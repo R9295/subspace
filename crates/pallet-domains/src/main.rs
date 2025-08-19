@@ -14,8 +14,9 @@ use pallet_domains::block_tree::{BlockTreeNode, verify_execution_receipt};
 use pallet_domains::domain_registry::{DomainConfig, DomainConfigParams, DomainObject};
 use pallet_domains::runtime_registry::ScheduledRuntimeUpgrade;
 use pallet_domains::staking::{
-    do_mark_invalid_bundle_authors, do_mark_operators_as_slashed, do_reward_operators,
-    do_unmark_invalid_bundle_authors,
+    do_deregister_operator, do_mark_invalid_bundle_authors, do_mark_operators_as_slashed,
+    do_nominate_operator, do_register_operator, do_reward_operators, do_unlock_funds,
+    do_unlock_nominator, do_unmark_invalid_bundle_authors, do_withdraw_stake, Operators,
 };
 use pallet_domains::staking_epoch::{do_finalize_domain_current_epoch, do_slash_operator};
 use pallet_domains::{
@@ -23,7 +24,8 @@ use pallet_domains::{
     DomainBlockNumberFor, DomainHashingFor, DomainRegistry, DomainRuntimeUpgradeRecords,
     DomainRuntimeUpgrades, ExecutionInbox, ExecutionReceiptOf, FraudProofError, FungibleHoldId,
     HeadDomainNumber, HeadReceiptNumber, MAX_NOMINATORS_TO_SLASH, NextDomainId, OperatorConfig,
-    RawOrigin as DomainOrigin, RuntimeRegistry, ScheduledRuntimeUpgrades, SlashedReason,
+    PendingSlashes, RawOrigin as DomainOrigin, RuntimeRegistry, ScheduledRuntimeUpgrades,
+    SlashedReason,
 };
 use pallet_subspace::NormalEraChange;
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
@@ -57,6 +59,7 @@ use sp_runtime::type_with_default::TypeWithDefault;
 use sp_runtime::{BuildStorage, OpaqueExtrinsic};
 use sp_version::{ApiId, RuntimeVersion, create_apis_vec};
 use std::num::NonZeroU64;
+use std::task::Wake;
 use subspace_core_primitives::pieces::Piece;
 use subspace_core_primitives::pot::PotOutput;
 use subspace_core_primitives::segments::HistorySize;
@@ -708,21 +711,15 @@ use arbitrary::Arbitrary;
 
 #[derive(Debug, Clone, Arbitrary, serde::Serialize, serde::Deserialize)]
 enum FuzzAction {
-    RegisterOperator {
-        operator_owner: u8,
-        amount: u8,
-        minimum_nominator_stake: u8,
-        nomination_tax: u8,
-    },
     NominateOperator {
         operator_id: u8,
         nominator_id: u128,
-        amount: u128,
+        amount: u8,
     },
     WithdrawStake {
         operator_id: u8,
         nominator_id: u128,
-        shares: u128,
+        shares: u8,
     },
     UnlockFunds {
         operator_id: u64,
@@ -749,87 +746,89 @@ enum FuzzAction {
     RewardOperator {
         operator_id: u8,
     },
+    SlashOperator {
+        operator_id: u8,
+    },
+}
+
+fn check_balance_conservation_invariant(
+    operators: &[AccountId],
+    nominators: &[AccountId],
+    expected_reward_amount: Balance,
+    expected_slash_amount: Balance,
+) {
+    // Calculate total free balances of all accounts
+    let mut total_free_balance = 0u128;
+    for account in operators.iter().chain(nominators.iter()) {
+        total_free_balance += <Test as Config>::Currency::free_balance(account);
+    }
+    
+    // Calculate total staked amounts across all operators  
+    let mut total_staked = 0u128;
+    let mut operator_id = 0u64;
+    while let Some(operator) = Operators::<Test>::get(operator_id) {
+        total_staked += operator.current_total_stake;
+        operator_id += 1;
+    }
+    
+    // Total tokens in system = free balances + staked amounts
+    let total_system_balance = total_free_balance + total_staked;
+    
+    // Expected total = initial balances + rewards - slashes
+    // Initial: 1000 * AI3 per account (5 operators + 5 nominators = 10 accounts)
+    let expected_total = 10 * 1000 * AI3 + expected_reward_amount - expected_slash_amount;
+    
+    assert_eq!(
+        total_system_balance, expected_total,
+        "Balance conservation violated! System has {} but expected {}. Free: {}, Staked: {}",
+        total_system_balance, expected_total, total_free_balance, total_staked
+    );
 }
 
 fn main() {
     ziggy::fuzz!(|data: &[u8]| {
-        /* let Ok(actions) = bincode::deserialize::<Vec<FuzzAction>>(data) else {
+        let Ok(actions) = bincode::deserialize::<Box<[FuzzAction; 32]>>(data) else {
             return;
-        }; */
-        let actions = vec![FuzzAction::RegisterOperator {
-            operator_owner: 0,
-            amount: 10,
-            minimum_nominator_stake: 10,
-            nomination_tax: 10,
-        }];
+        };
         let mut ext = new_test_ext_with_extensions();
         let operators: Vec<AccountId> = (0..5).map(|i| (i as u128).into()).collect();
         let nominators: Vec<AccountId> = (5..10).map(|i| (i as u128).into()).collect();
         ext.execute_with(|| {
+            for nominator in &nominators {
+                <Test as Config>::Currency::make_free_balance_be(&nominator, 1000 * AI3);
+            }
+            for operator in &operators {
+                <Test as Config>::Currency::make_free_balance_be(&operator, 1000 * AI3);
+            }
             let domain_id = register_genesis_domain(1, 1);
-            for action in actions {
-                if !matches!(action, FuzzAction::Finalize) {
-                    // Always finalize the epoch at the end to process any pending operations
-                    let _ = do_finalize_domain_current_epoch::<Test>(domain_id);
-                }
+            for operator_owner in &operators {
+                let minimum_nominator_stake = (10 * AI3 + 10 as u128 * AI3);
+                let pair = OperatorPair::from_seed(&[0u8; 32]);
+                let config = OperatorConfig {
+                    signing_key: pair.public(),
+                    minimum_nominator_stake,
+                    nomination_tax: sp_runtime::Percent::from_percent(60),
+                };
+                let res = do_register_operator::<Test>(*operator_owner, 0.into(), 200, config);
+                #[cfg(not(feature = "fuzzing"))]
+                println!("{:?}", res);
+            }
+            #[cfg(not(feature = "fuzzing"))]
+            println!("Done with operators");
+            for action in actions.into_iter() {
+                println!("--> {:?}", action);
                 match action {
                     FuzzAction::Finalize => {
-                        // Always finalize the epoch at the end to process any pending operations
-                        let _ = do_finalize_domain_current_epoch::<Test>(domain_id);
-                    }
-                    FuzzAction::RegisterOperator {
-                        operator_owner,
-                        amount,
-                        minimum_nominator_stake,
-                        nomination_tax,
-                    } => {
-                        let amount = (amount as u128).min(10 * AI3);
-                        let minimum_nominator_stake =
-                            (minimum_nominator_stake as u128).min(10 * AI3);
-                        let operator_owner = operators
-                            .get(operator_owner as usize % operators.len())
-                            .unwrap();
-
-                        <Test as Config>::Currency::make_free_balance_be(
-                            operator_owner,
-                            amount as u128 + ExistentialDeposit::get() + 10 * AI3,
-                        );
-
-                        let pair = OperatorPair::from_seed(&[0u8; 32]);
-                        let config = OperatorConfig {
-                            signing_key: pair.public(),
-                            minimum_nominator_stake,
-                            nomination_tax: sp_runtime::Percent::from_percent(
-                                100 % if nomination_tax == 0 {
-                                    1
-                                } else {
-                                    nomination_tax
-                                },
-                            ),
-                        };
-
-                        let next_operator_id = pallet_domains::NextOperatorId::<Test>::get();
-                        let res = pallet_domains::Pallet::<Test>::register_operator(
-                            RuntimeOrigin::signed(*operator_owner),
-                            domain_id,
-                            amount as u128,
-                            config,
-                        );
-                        #[cfg(not(feature = "fuzzing"))]
+                        let res = do_finalize_domain_current_epoch::<Test>(domain_id);
                         println!("{:?}", res);
+                        debug_assert!(res.is_ok());
                     }
                     FuzzAction::NominateOperator {
                         operator_id,
                         nominator_id,
                         amount,
                     } => {
-                        let amount = amount.min(10 * AI3);
-
-                        <Test as Config>::Currency::make_free_balance_be(
-                            &nominator_id,
-                            amount + ExistentialDeposit::get() + 1000 * AI3,
-                        );
-
+                        let amount = amount as u128 * AI3;
                         let nominator = nominators
                             .get(nominator_id as usize % nominators.len())
                             .unwrap();
@@ -837,11 +836,8 @@ fn main() {
                             .get(operator_id as usize % operators.len())
                             .unwrap();
 
-                        let res = pallet_domains::Pallet::<Test>::nominate_operator(
-                            RuntimeOrigin::signed(*nominator),
-                            *operator as u64,
-                            amount,
-                        );
+                        let res =
+                            do_nominate_operator::<Test>(*operator as u64, *nominator, amount);
                         #[cfg(not(feature = "fuzzing"))]
                         println!("{:?}", res);
                     }
@@ -850,18 +846,14 @@ fn main() {
                         nominator_id,
                         shares,
                     } => {
-                        let shares = shares.min(10 * AI3);
+                        let shares = shares as u128;
                         let nominator = nominators
                             .get(nominator_id as usize % nominators.len())
                             .unwrap();
                         let operator = operators
                             .get(operator_id as usize % operators.len())
                             .unwrap();
-                        let res = pallet_domains::Pallet::<Test>::withdraw_stake(
-                            RuntimeOrigin::signed(*nominator),
-                            *operator as u64,
-                            shares,
-                        );
+                        let res = do_withdraw_stake::<Test>(*operator as u64, *nominator, shares);
                         #[cfg(not(feature = "fuzzing"))]
                         println!("{:?}", res);
                     }
@@ -877,6 +869,18 @@ fn main() {
                         )
                         .unwrap()
                     }
+                    FuzzAction::SlashOperator { operator_id } => {
+                        let operator = operators
+                            .get(operator_id as usize % operators.len())
+                            .unwrap();
+                        let mut slashes =
+                            PendingSlashes::<Test>::get(DOMAIN_ID).unwrap_or_default();
+                        slashes.insert(*operator as u64);
+                        PendingSlashes::<Test>::set(DOMAIN_ID, Some(slashes));
+                        let res = do_slash_operator::<Test>(DOMAIN_ID, MAX_NOMINATORS_TO_SLASH);
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
+                    }
                     FuzzAction::UnlockFunds {
                         operator_id,
                         nominator_id,
@@ -887,10 +891,7 @@ fn main() {
                         let operator = operators
                             .get(operator_id as usize % operators.len())
                             .unwrap();
-                        let res = pallet_domains::Pallet::<Test>::unlock_funds(
-                            RuntimeOrigin::signed(*nominator),
-                            *operator as u64,
-                        );
+                        let res = do_unlock_funds::<Test>(*nominator as u64, *operator as u128);
                         #[cfg(not(feature = "fuzzing"))]
                         println!("{:?}", res);
                     }
@@ -904,10 +905,7 @@ fn main() {
                         let operator = operators
                             .get(operator_id as usize % operators.len())
                             .unwrap();
-                        let res = pallet_domains::Pallet::<Test>::unlock_nominator(
-                            RuntimeOrigin::signed(*nominator),
-                            *operator as u64,
-                        );
+                        let res = do_unlock_nominator::<Test>(*operator as u64, *nominator);
                         #[cfg(not(feature = "fuzzing"))]
                         println!("{:?}", res);
                     }
@@ -915,10 +913,7 @@ fn main() {
                         let operator = operators
                             .get(operator_id as usize % operators.len())
                             .unwrap();
-                        let res = pallet_domains::Pallet::<Test>::deregister_operator(
-                            RuntimeOrigin::signed(*operator),
-                            *operator as u64,
-                        );
+                        let res = do_deregister_operator::<Test>(*operator, *operator as u64);
                         #[cfg(not(feature = "fuzzing"))]
                         println!("{:?}", res);
                     }

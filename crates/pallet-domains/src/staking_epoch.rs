@@ -32,7 +32,7 @@ pub enum Error {
     FinalizeDomainEpochStaking(TransitionError),
     OperatorRewardStaking(TransitionError),
 }
-
+#[derive(Debug)]
 pub struct EpochTransitionResult {
     pub rewarded_operator_count: u32,
     pub finalized_operator_count: u32,
