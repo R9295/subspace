@@ -2337,8 +2337,7 @@ pub mod tests {
     pub const MIN_PROP_OPERATOR_STAKE: u128 = 3 * <Test as Config>::MinOperatorStake::get();
 
     /// The minimum nominator stake we test for in property tests.
-    pub const MIN_PROP_NOMINATOR_STAKE: u128 =
-        <Test as Config>::MinNominatorStake::get() + 1;
+    pub const MIN_PROP_NOMINATOR_STAKE: u128 = <Test as Config>::MinNominatorStake::get() + 1;
 
     /// The range of operator stakes we test for in property tests.
     pub const PROP_OPERATOR_STAKE_RANGE: RangeInclusive<u128> =

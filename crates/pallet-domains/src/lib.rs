@@ -524,8 +524,7 @@ mod pallet {
 
     /// The highest slot of the bundle submitted by an operator
     #[pallet::storage]
-    pub type OperatorHighestSlot<T: Config> =
-        StorageMap<_, Identity, OperatorId, u64, ValueQuery>;
+    pub type OperatorHighestSlot<T: Config> = StorageMap<_, Identity, OperatorId, u64, ValueQuery>;
 
     /// The set of slot of the bundle submitted by an operator in the current block, cleared at the
     /// next block initialization

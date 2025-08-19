@@ -1,74 +1,58 @@
 #![feature(variant_count)]
-use frame_support::traits::fungible::InspectHold;
 use core::mem;
 use domain_runtime_primitives::BlockNumber as DomainBlockNumber;
 use domain_runtime_primitives::opaque::Header as DomainHeader;
 use frame_support::dispatch::{DispatchInfo, RawOrigin};
+use frame_support::traits::fungible::InspectHold;
 use frame_support::traits::{ConstU64, Currency, Hooks, VariantCount};
 use frame_support::weights::constants::ParityDbWeight;
 use frame_support::weights::{IdentityFee, Weight};
-use frame_support::{PalletId, assert_err, assert_ok, derive_impl, parameter_types};
+use frame_support::{PalletId, assert_ok, derive_impl, parameter_types};
 use frame_system::mocking::MockUncheckedExtrinsic;
 use frame_system::pallet_prelude::*;
-use hex_literal::hex;
-use pallet_domains::block_tree::{BlockTreeNode, verify_execution_receipt};
-use pallet_domains::domain_registry::{DomainConfig, DomainConfigParams, DomainObject};
-use pallet_domains::runtime_registry::ScheduledRuntimeUpgrade;
+use pallet_domains::block_tree::BlockTreeNode;
+use pallet_domains::domain_registry::DomainConfigParams;
 use pallet_domains::staking::{
     do_deregister_operator, do_mark_invalid_bundle_authors, do_mark_operators_as_slashed,
     do_nominate_operator, do_register_operator, do_reward_operators, do_unlock_funds,
     do_unlock_nominator, do_unmark_invalid_bundle_authors, do_withdraw_stake,
-    OperatorStatus
 };
 use pallet_domains::staking_epoch::{do_finalize_domain_current_epoch, do_slash_operator};
 use pallet_domains::{
-    BalanceOf, BlockSlot, BlockTree, BlockTreeNodes, BundleError, Config, ConsensusBlockHash,
-    DomainBlockNumberFor, DomainHashingFor, DomainRegistry, DomainRuntimeUpgradeRecords,
-    DomainRuntimeUpgrades, ExecutionInbox, ExecutionReceiptOf, FraudProofError, FungibleHoldId,
-    HeadDomainNumber, HeadReceiptNumber, MAX_NOMINATORS_TO_SLASH, NextDomainId, OperatorConfig,
-    PendingSlashes, RawOrigin as DomainOrigin, RuntimeRegistry, ScheduledRuntimeUpgrades,
-    SlashedReason, Operators,
+    BalanceOf, BlockSlot, BlockTree, BlockTreeNodes, Config, DomainBlockNumberFor,
+    DomainHashingFor, ExecutionReceiptOf, FungibleHoldId, HeadReceiptNumber,
+    MAX_NOMINATORS_TO_SLASH, OperatorConfig, Operators, PendingSlashes, RawOrigin as DomainOrigin,
+    SlashedReason,
 };
 use pallet_subspace::NormalEraChange;
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
-use sp_consensus_slots::Slot;
 use sp_core::crypto::Pair;
 use sp_core::{Get, H256};
 use sp_domains::bundle::bundle_v0::{BundleHeaderV0, BundleV0, SealedBundleHeaderV0};
 use sp_domains::bundle::{BundleVersion, InboxedBundle, OpaqueBundle};
-use sp_domains::bundle_producer_election::make_transcript;
 use sp_domains::execution_receipt::execution_receipt_v0::ExecutionReceiptV0;
-use sp_domains::execution_receipt::{ExecutionReceipt, ExecutionReceiptVersion, SingletonReceipt};
+use sp_domains::execution_receipt::{ExecutionReceipt, ExecutionReceiptVersion};
 use sp_domains::merkle_tree::MerkleTree;
 use sp_domains::storage::RawGenesis;
 use sp_domains::{
-    BundleAndExecutionReceiptVersion, ChainId, DomainId, EMPTY_EXTRINSIC_ROOT, OperatorAllowList,
-    OperatorId, OperatorPair, OperatorRewardSource, OperatorSignature, ProofOfElection, RuntimeId,
-    RuntimeType,
+    BundleAndExecutionReceiptVersion, ChainId, DomainId, OperatorAllowList, OperatorId,
+    OperatorPair, OperatorRewardSource, ProofOfElection, RuntimeType,
 };
-use sp_domains_fraud_proof::fraud_proof::FraudProof;
 use sp_keystore::Keystore;
-use sp_keystore::testing::MemoryKeystore;
-use sp_runtime::app_crypto::AppCrypto;
-use sp_runtime::generic::{EXTRINSIC_FORMAT_VERSION, Preamble};
+use sp_runtime::BuildStorage;
 use sp_runtime::traits::{
-    AccountIdConversion, BlakeTwo256, BlockNumberProvider, Bounded, ConstU16, Hash as HashT,
-    IdentityLookup, One, Zero,
+    AccountIdConversion, BlockNumberProvider, ConstU16, Hash as HashT, IdentityLookup, One, Zero,
 };
 use sp_runtime::transaction_validity::TransactionValidityError;
-use sp_runtime::type_with_default::TypeWithDefault;
-use sp_runtime::{BuildStorage, OpaqueExtrinsic};
 use sp_version::{ApiId, RuntimeVersion, create_apis_vec};
 use std::num::NonZeroU64;
-use std::task::Wake;
+use subspace_core_primitives::SlotNumber;
 use subspace_core_primitives::pieces::Piece;
-use subspace_core_primitives::pot::PotOutput;
 use subspace_core_primitives::segments::HistorySize;
 use subspace_core_primitives::solutions::SolutionRange;
-use subspace_core_primitives::{SlotNumber, U256 as P256};
 use subspace_runtime_primitives::{
-    AI3, BlockHashFor, ConsensusEventSegmentSize, HoldIdentifier, Moment, Nonce, StorageFee,
+    AI3, ConsensusEventSegmentSize, HoldIdentifier, Moment, StorageFee,
 };
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
@@ -740,64 +724,69 @@ fn check_balance_conservation_invariant(
 ) {
     // Include account 1 (domain creator) in our calculations
     let domain_creator: AccountId = 1;
-    
+
     // Calculate total free balances of all accounts
     let mut total_free_balance = 0u128;
-    for account in operators.iter().chain(nominators.iter()).chain(std::iter::once(&domain_creator)) {
+    for account in operators
+        .iter()
+        .chain(nominators.iter())
+        .chain(std::iter::once(&domain_creator))
+    {
         total_free_balance += <Test as Config>::Currency::free_balance(account);
     }
-    
+
     // Calculate total held balances (deposits and stakes)
     let mut total_held = 0u128;
-    for account in operators.iter().chain(nominators.iter()).chain(std::iter::once(&domain_creator)) {
+    for account in operators
+        .iter()
+        .chain(nominators.iter())
+        .chain(std::iter::once(&domain_creator))
+    {
         total_held += <Test as Config>::Currency::total_balance_on_hold(account);
     }
-    
-    // Total tokens in system = free balances + held balances  
+
+    // Total tokens in system = free balances + held balances
     let total_system_balance = total_free_balance + total_held;
-    
+
     // Expected total = initial system state + rewards - slashes
     let expected_total = initial_total + expected_reward_amount - expected_slash_amount;
-    
+
     assert_eq!(
         total_system_balance, expected_total,
-        "Balance conservation violated! System has {} but expected {}. Free: {}, Held: {}",
-        total_system_balance, expected_total, total_free_balance, total_held
+        "Balance conservation violated! System has {total_system_balance} but expected {expected_total}. Free: {total_free_balance}, Held: {total_held}"
     );
 }
 
 fn check_stake_consistency_invariant() {
     let mut operator_id = 0u64;
-    
+
     // Check each operator's stake/shares consistency
     while let Some(operator) = Operators::<Test>::get(operator_id) {
         /* let mut calculated_total_shares = 0u128;
-        
+
         // Verify total shares consistency
         assert_eq!(
-            calculated_total_shares, 
+            calculated_total_shares,
             operator.current_total_shares.into(),
             "Share consistency violated for operator {}! Calculated shares: {}, Stored shares: {}",
             operator_id, calculated_total_shares, operator.current_total_shares.into()
         ); */
-        
+
         // Verify stake > 0 implies shares > 0 and vice versa
-        if operator.current_total_stake > 0u128.into() {
+        if operator.current_total_stake > 0u128 {
             assert!(
-                operator.current_total_shares > 0u128.into(),
-                "Stake > 0 but shares = 0 for operator {}", 
-                operator_id
+                operator.current_total_shares > 0u128,
+                "Stake > 0 but shares = 0 for operator {operator_id}"
             );
         }
-        
-        if operator.current_total_shares > 0u128.into() {
+
+        if operator.current_total_shares > 0u128 {
             assert!(
-                operator.current_total_stake > 0u128.into(),
-                "Shares > 0 but stake = 0 for operator {}", 
-                operator_id
+                operator.current_total_stake > 0u128,
+                "Shares > 0 but stake = 0 for operator {operator_id}"
             );
         }
-        
+
         operator_id += 1;
     }
 }
@@ -808,35 +797,36 @@ fn main() {
             return;
         };
         let mut ext = new_test_ext_with_extensions();
-        let operators: Vec<AccountId> = (0..5).map(|i| (i as u128).into()).collect();
-        let nominators: Vec<AccountId> = (5..10).map(|i| (i as u128).into()).collect();
+        let operators: Vec<AccountId> = (0..5).map(|i| (i as u128)).collect();
+        let nominators: Vec<AccountId> = (5..10).map(|i| (i as u128)).collect();
         ext.execute_with(|| {
             for nominator in &nominators {
-                <Test as Config>::Currency::make_free_balance_be(&nominator, 1000 * AI3);
+                <Test as Config>::Currency::make_free_balance_be(nominator, 1000 * AI3);
             }
             for operator in &operators {
-                <Test as Config>::Currency::make_free_balance_be(&operator, 10000 * AI3);
+                <Test as Config>::Currency::make_free_balance_be(operator, 10000 * AI3);
             }
             let domain_id = register_genesis_domain(1, 1);
             for operator_owner in &operators {
-                let minimum_nominator_stake = (10 * AI3 + 10 as u128 * AI3);
+                let minimum_nominator_stake = 10 * AI3 + 10_u128 * AI3;
                 let pair = OperatorPair::from_seed(&[*operator_owner as u8; 32]);
                 let config = OperatorConfig {
                     signing_key: pair.public(),
                     minimum_nominator_stake,
                     nomination_tax: sp_runtime::Percent::from_percent(60),
                 };
-                let res = do_register_operator::<Test>(*operator_owner, 0.into(), 200 * AI3, config);
-                debug_assert!(res.is_ok()); 
+                let res =
+                    do_register_operator::<Test>(*operator_owner, 0.into(), 200 * AI3, config);
+                debug_assert!(res.is_ok());
                 #[cfg(not(feature = "fuzzing"))]
-                println!("{:?}", res);
+                println!("{res:?}");
             }
             #[cfg(not(feature = "fuzzing"))]
             println!("Done with operators");
-            
+
             /* let mut total_rewards_given = 0u128;
             let mut total_slashes_applied = 0u128;
-            
+
             // Capture initial total balance after setup
             let domain_creator: AccountId = 1;
             let mut initial_total = 0u128;
@@ -844,15 +834,15 @@ fn main() {
                 initial_total += <Test as Config>::Currency::free_balance(account);
                 initial_total += <Test as Config>::Currency::total_balance_on_hold(account);
             } */
-            
+
             for action in actions.into_iter() {
                 #[cfg(not(feature = "fuzzing"))]
-                println!("--> {:?}", action);
+                println!("--> {action:?}");
                 match action {
                     FuzzAction::Finalize => {
                         let res = do_finalize_domain_current_epoch::<Test>(domain_id);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                         debug_assert!(res.is_ok());
                     }
                     FuzzAction::NominateOperator {
@@ -871,7 +861,7 @@ fn main() {
                         let res =
                             do_nominate_operator::<Test>(*operator as u64, *nominator, amount);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::WithdrawStake {
                         operator_id,
@@ -887,7 +877,7 @@ fn main() {
                             .unwrap();
                         let res = do_withdraw_stake::<Test>(*operator as u64, *nominator, shares);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::RewardOperator { operator_id } => {
                         let operator = operators
@@ -901,7 +891,7 @@ fn main() {
                             reward_amount,
                         )
                         .unwrap();
-/*                         total_rewards_given += reward_amount; */
+                        /*                         total_rewards_given += reward_amount; */
                     }
                     FuzzAction::SlashOperator { operator_id } => {
                         let operator = operators
@@ -913,7 +903,7 @@ fn main() {
                         PendingSlashes::<Test>::set(DOMAIN_ID, Some(slashes));
                         let res = do_slash_operator::<Test>(DOMAIN_ID, MAX_NOMINATORS_TO_SLASH);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::UnlockFunds {
                         operator_id,
@@ -925,9 +915,9 @@ fn main() {
                         let operator = operators
                             .get(operator_id as usize % operators.len())
                             .unwrap();
-                        let res = do_unlock_funds::<Test>(*nominator as u64, *operator as u128);
+                        let res = do_unlock_funds::<Test>(*nominator as u64, (*operator));
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::UnlockNominator {
                         operator_id,
@@ -941,7 +931,7 @@ fn main() {
                             .unwrap();
                         let res = do_unlock_nominator::<Test>(*operator as u64, *nominator);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::DeregisterOperator { operator_id } => {
                         let operator = operators
@@ -949,7 +939,7 @@ fn main() {
                             .unwrap();
                         let res = do_deregister_operator::<Test>(*operator, *operator as u64);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::MarkOperatorsAsSlashed {
                         operator_ids,
@@ -961,9 +951,9 @@ fn main() {
                         };
                         let res =
                             do_mark_operators_as_slashed::<Test>(vec![operator_ids], slash_reason);
-/*                         total_slashes_applied += 320 * AI3; */
+                        /*                         total_slashes_applied += 320 * AI3; */
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::MarkInvalidBundleAuthors { operator_ids } => {
                         // Create a dummy execution receipt to simulate marking invalid bundle authors
@@ -971,7 +961,7 @@ fn main() {
                             create_dummy_receipt(1, H256::random(), H256::default(), vec![]);
                         let res = do_mark_invalid_bundle_authors::<Test>(domain_id, &dummy_receipt);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                     FuzzAction::UnmarkInvalidBundleAuthors { operator_ids } => {
                         // Create a dummy execution receipt to simulate unmarking invalid bundle authors
@@ -980,16 +970,16 @@ fn main() {
                         let res =
                             do_unmark_invalid_bundle_authors::<Test>(domain_id, &dummy_receipt);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("{:?}", res);
+                        println!("{res:?}");
                     }
                 }
-                
+
                 /* // Check balance conservation invariant after each action
                 check_balance_conservation_invariant(
-                    &operators, 
+                    &operators,
                     &nominators,
                     initial_total,
-                    total_rewards_given, 
+                    total_rewards_given,
                     total_slashes_applied
                 ); */
             }
