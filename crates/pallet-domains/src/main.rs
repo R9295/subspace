@@ -13,13 +13,17 @@ use hex_literal::hex;
 use pallet_domains::block_tree::{BlockTreeNode, verify_execution_receipt};
 use pallet_domains::domain_registry::{DomainConfig, DomainConfigParams, DomainObject};
 use pallet_domains::runtime_registry::ScheduledRuntimeUpgrade;
-use pallet_domains::staking_epoch::do_finalize_domain_current_epoch;
+use pallet_domains::staking::{
+    do_mark_invalid_bundle_authors, do_mark_operators_as_slashed, do_reward_operators,
+    do_unmark_invalid_bundle_authors,
+};
+use pallet_domains::staking_epoch::{do_finalize_domain_current_epoch, do_slash_operator};
 use pallet_domains::{
     BalanceOf, BlockSlot, BlockTree, BlockTreeNodes, BundleError, Config, ConsensusBlockHash,
     DomainBlockNumberFor, DomainHashingFor, DomainRegistry, DomainRuntimeUpgradeRecords,
     DomainRuntimeUpgrades, ExecutionInbox, ExecutionReceiptOf, FraudProofError, FungibleHoldId,
-    HeadDomainNumber, HeadReceiptNumber, NextDomainId, OperatorConfig, RawOrigin as DomainOrigin,
-    RuntimeRegistry, ScheduledRuntimeUpgrades,
+    HeadDomainNumber, HeadReceiptNumber, MAX_NOMINATORS_TO_SLASH, NextDomainId, OperatorConfig,
+    RawOrigin as DomainOrigin, RuntimeRegistry, ScheduledRuntimeUpgrades, SlashedReason,
 };
 use pallet_subspace::NormalEraChange;
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
@@ -36,7 +40,8 @@ use sp_domains::merkle_tree::MerkleTree;
 use sp_domains::storage::RawGenesis;
 use sp_domains::{
     BundleAndExecutionReceiptVersion, ChainId, DomainId, EMPTY_EXTRINSIC_ROOT, OperatorAllowList,
-    OperatorId, OperatorPair, OperatorSignature, ProofOfElection, RuntimeId, RuntimeType,
+    OperatorId, OperatorPair, OperatorRewardSource, OperatorSignature, ProofOfElection, RuntimeId,
+    RuntimeType,
 };
 use sp_domains_fraud_proof::fraud_proof::FraudProof;
 use sp_keystore::Keystore;
@@ -613,7 +618,7 @@ pub(crate) fn register_genesis_domain(creator: u128, operator_number: usize) -> 
     )
     .unwrap();
 
-    let pair = OperatorPair::from_seed(&[0; 32]);
+    /* let pair = OperatorPair::from_seed(&[0; 32]);
     for _ in 0..operator_number {
         pallet_domains::Pallet::<Test>::register_operator(
             RawOrigin::Signed(creator).into(),
@@ -622,13 +627,12 @@ pub(crate) fn register_genesis_domain(creator: u128, operator_number: usize) -> 
             OperatorConfig {
                 signing_key: pair.public(),
                 minimum_nominator_stake: AI3,
-                nomination_tax: Default::default(),
+                nomination_tax: 15.into(),
             },
         )
         .unwrap();
-    }
+    } */
     do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
-
     domain_id
 }
 
@@ -702,152 +706,254 @@ pub(crate) fn get_block_tree_node_at<T: Config>(
 }
 use arbitrary::Arbitrary;
 
-#[derive(Debug, Arbitrary)]
+#[derive(Debug, Clone, Arbitrary, serde::Serialize, serde::Deserialize)]
 enum FuzzAction {
     RegisterOperator {
-        operator_owner: AccountId,
-        domain_id: u32,
-        amount: u128,
-        signing_key_seed: [u8; 32],
-        minimum_nominator_stake: u128,
+        operator_owner: u8,
+        amount: u8,
+        minimum_nominator_stake: u8,
         nomination_tax: u8,
     },
     NominateOperator {
-        operator_id: u64,
-        nominator_id: AccountId,
+        operator_id: u8,
+        nominator_id: u128,
         amount: u128,
     },
     WithdrawStake {
-        operator_id: u64,
-        nominator_id: AccountId,
+        operator_id: u8,
+        nominator_id: u128,
         shares: u128,
     },
     UnlockFunds {
         operator_id: u64,
-        nominator_id: AccountId,
+        nominator_id: u8,
     },
     UnlockNominator {
         operator_id: u64,
-        nominator_id: AccountId,
+        nominator_id: u8,
     },
     DeregisterOperator {
         operator_id: u64,
-        operator_owner: AccountId,
     },
-    FinalizeEpoch,
+    MarkOperatorsAsSlashed {
+        operator_ids: u64,
+        slash_reason: u8, // 0 for InvalidBundle, 1 for BadExecutionReceipt
+    },
+    MarkInvalidBundleAuthors {
+        operator_ids: u8,
+    },
+    UnmarkInvalidBundleAuthors {
+        operator_ids: u8,
+    },
+    Finalize,
+    RewardOperator {
+        operator_id: u8,
+    },
 }
 
 fn main() {
     ziggy::fuzz!(|data: &[u8]| {
-        let mut ext = new_test_ext();
+        /* let Ok(actions) = bincode::deserialize::<Vec<FuzzAction>>(data) else {
+            return;
+        }; */
+        let actions = vec![FuzzAction::RegisterOperator {
+            operator_owner: 0,
+            amount: 10,
+            minimum_nominator_stake: 10,
+            nomination_tax: 10,
+        }];
+        let mut ext = new_test_ext_with_extensions();
+        let operators: Vec<AccountId> = (0..5).map(|i| (i as u128).into()).collect();
+        let nominators: Vec<AccountId> = (5..10).map(|i| (i as u128).into()).collect();
         ext.execute_with(|| {
-            let actions = match Vec::<FuzzAction>::arbitrary(&mut arbitrary::Unstructured::new(data)) {
-                Ok(actions) => actions,
-                Err(_) => return,
-            };
-
             let domain_id = register_genesis_domain(1, 1);
-
             for action in actions {
+                if !matches!(action, FuzzAction::Finalize) {
+                    // Always finalize the epoch at the end to process any pending operations
+                    let _ = do_finalize_domain_current_epoch::<Test>(domain_id);
+                }
                 match action {
+                    FuzzAction::Finalize => {
+                        // Always finalize the epoch at the end to process any pending operations
+                        let _ = do_finalize_domain_current_epoch::<Test>(domain_id);
+                    }
                     FuzzAction::RegisterOperator {
                         operator_owner,
-                        domain_id: _,
                         amount,
-                        signing_key_seed,
                         minimum_nominator_stake,
                         nomination_tax,
                     } => {
-                        let amount = amount.min(1_000_000 * AI3);
-                        let minimum_nominator_stake = minimum_nominator_stake.min(1_000_000 * AI3);
-                        
+                        let amount = (amount as u128).min(10 * AI3);
+                        let minimum_nominator_stake =
+                            (minimum_nominator_stake as u128).min(10 * AI3);
+                        let operator_owner = operators
+                            .get(operator_owner as usize % operators.len())
+                            .unwrap();
+
                         <Test as Config>::Currency::make_free_balance_be(
-                            &operator_owner,
-                            amount + ExistentialDeposit::get() + 1000 * AI3,
+                            operator_owner,
+                            amount as u128 + ExistentialDeposit::get() + 10 * AI3,
                         );
 
-                        let pair = OperatorPair::from_seed(&signing_key_seed);
+                        let pair = OperatorPair::from_seed(&[0u8; 32]);
                         let config = OperatorConfig {
                             signing_key: pair.public(),
                             minimum_nominator_stake,
-                            nomination_tax: sp_runtime::Percent::from_percent(nomination_tax % 100),
+                            nomination_tax: sp_runtime::Percent::from_percent(
+                                100 % if nomination_tax == 0 {
+                                    1
+                                } else {
+                                    nomination_tax
+                                },
+                            ),
                         };
 
                         let next_operator_id = pallet_domains::NextOperatorId::<Test>::get();
-                        if pallet_domains::Pallet::<Test>::register_operator(
-                            RawOrigin::Signed(operator_owner).into(),
+                        let res = pallet_domains::Pallet::<Test>::register_operator(
+                            RuntimeOrigin::signed(*operator_owner),
                             domain_id,
-                            amount.into(),
+                            amount as u128,
                             config,
-                        ).is_ok() {
-                        }
+                        );
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
                     }
                     FuzzAction::NominateOperator {
                         operator_id,
                         nominator_id,
                         amount,
                     } => {
-                        let amount = amount.min(1_000_000 * AI3);
-                        
+                        let amount = amount.min(10 * AI3);
+
                         <Test as Config>::Currency::make_free_balance_be(
                             &nominator_id,
                             amount + ExistentialDeposit::get() + 1000 * AI3,
                         );
 
-                        let _ = pallet_domains::Pallet::<Test>::nominate_operator(
-                            RawOrigin::Signed(nominator_id).into(),
-                            operator_id,
+                        let nominator = nominators
+                            .get(nominator_id as usize % nominators.len())
+                            .unwrap();
+                        let operator = operators
+                            .get(operator_id as usize % operators.len())
+                            .unwrap();
+
+                        let res = pallet_domains::Pallet::<Test>::nominate_operator(
+                            RuntimeOrigin::signed(*nominator),
+                            *operator as u64,
                             amount,
                         );
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
                     }
                     FuzzAction::WithdrawStake {
                         operator_id,
                         nominator_id,
                         shares,
                     } => {
-                        let shares = shares.min(1_000_000 * AI3);
-                        
-                        let _ = pallet_domains::Pallet::<Test>::withdraw_stake(
-                            RawOrigin::Signed(nominator_id).into(),
-                            operator_id,
+                        let shares = shares.min(10 * AI3);
+                        let nominator = nominators
+                            .get(nominator_id as usize % nominators.len())
+                            .unwrap();
+                        let operator = operators
+                            .get(operator_id as usize % operators.len())
+                            .unwrap();
+                        let res = pallet_domains::Pallet::<Test>::withdraw_stake(
+                            RuntimeOrigin::signed(*nominator),
+                            *operator as u64,
                             shares,
                         );
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
+                    }
+                    FuzzAction::RewardOperator { operator_id } => {
+                        let operator = operators
+                            .get(operator_id as usize % operators.len())
+                            .unwrap();
+                        do_reward_operators::<Test>(
+                            domain_id,
+                            OperatorRewardSource::Dummy,
+                            vec![*operator as u64].into_iter(),
+                            100 * AI3,
+                        )
+                        .unwrap()
                     }
                     FuzzAction::UnlockFunds {
                         operator_id,
                         nominator_id,
                     } => {
-                        let _ = pallet_domains::Pallet::<Test>::unlock_funds(
-                            RawOrigin::Signed(nominator_id).into(),
-                            operator_id,
+                        let nominator = nominators
+                            .get(nominator_id as usize % nominators.len())
+                            .unwrap();
+                        let operator = operators
+                            .get(operator_id as usize % operators.len())
+                            .unwrap();
+                        let res = pallet_domains::Pallet::<Test>::unlock_funds(
+                            RuntimeOrigin::signed(*nominator),
+                            *operator as u64,
                         );
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
                     }
                     FuzzAction::UnlockNominator {
                         operator_id,
                         nominator_id,
                     } => {
-                        let _ = pallet_domains::Pallet::<Test>::unlock_nominator(
-                            RawOrigin::Signed(nominator_id).into(),
-                            operator_id,
+                        let nominator = nominators
+                            .get(nominator_id as usize % nominators.len())
+                            .unwrap();
+                        let operator = operators
+                            .get(operator_id as usize % operators.len())
+                            .unwrap();
+                        let res = pallet_domains::Pallet::<Test>::unlock_nominator(
+                            RuntimeOrigin::signed(*nominator),
+                            *operator as u64,
                         );
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
                     }
-                    FuzzAction::DeregisterOperator {
-                        operator_id,
-                        operator_owner,
+                    FuzzAction::DeregisterOperator { operator_id } => {
+                        let operator = operators
+                            .get(operator_id as usize % operators.len())
+                            .unwrap();
+                        let res = pallet_domains::Pallet::<Test>::deregister_operator(
+                            RuntimeOrigin::signed(*operator),
+                            *operator as u64,
+                        );
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
+                    }
+                    FuzzAction::MarkOperatorsAsSlashed {
+                        operator_ids,
+                        slash_reason,
                     } => {
-                        let _ = pallet_domains::Pallet::<Test>::deregister_operator(
-                            RawOrigin::Signed(operator_owner).into(),
-                            operator_id,
-                        );
+                        let slash_reason = match slash_reason % 2 {
+                            0 => SlashedReason::InvalidBundle(0),
+                            _ => SlashedReason::BadExecutionReceipt(H256::from([0u8; 32])),
+                        };
+                        let res =
+                            do_mark_operators_as_slashed::<Test>(vec![operator_ids], slash_reason);
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
                     }
-                    FuzzAction::FinalizeEpoch => {
-                        let _ = do_finalize_domain_current_epoch::<Test>(domain_id);
+                    FuzzAction::MarkInvalidBundleAuthors { operator_ids } => {
+                        // Create a dummy execution receipt to simulate marking invalid bundle authors
+                        let dummy_receipt =
+                            create_dummy_receipt(1, H256::random(), H256::default(), vec![]);
+                        let res = do_mark_invalid_bundle_authors::<Test>(domain_id, &dummy_receipt);
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
+                    }
+                    FuzzAction::UnmarkInvalidBundleAuthors { operator_ids } => {
+                        // Create a dummy execution receipt to simulate unmarking invalid bundle authors
+                        let dummy_receipt =
+                            create_dummy_receipt(1, H256::random(), H256::default(), vec![]);
+                        let res =
+                            do_unmark_invalid_bundle_authors::<Test>(domain_id, &dummy_receipt);
+                        #[cfg(not(feature = "fuzzing"))]
+                        println!("{:?}", res);
                     }
                 }
             }
-
-            // Always finalize the epoch at the end to process any pending operations
-            let _ = do_finalize_domain_current_epoch::<Test>(domain_id);
         });
     });
 }

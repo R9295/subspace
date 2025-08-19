@@ -7977,6 +7977,7 @@ name = "pallet-domains"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "bincode",
  "domain-pallet-executive",
  "domain-runtime-primitives",
  "frame-benchmarking",
@@ -7992,6 +7993,7 @@ dependencies = [
  "prop-test",
  "scale-info",
  "schnorrkel",
+ "serde",
  "sp-consensus-slots",
  "sp-consensus-subspace",
  "sp-core",

@@ -43,6 +43,8 @@ subspace-core-primitives.workspace = true
 subspace-runtime-primitives.workspace = true
 ziggy = { version = "1.3.2", default-features = false }
 arbitrary = { version = "1.4.2", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+bincode = "1"
 
 [dev-dependencies]
 
