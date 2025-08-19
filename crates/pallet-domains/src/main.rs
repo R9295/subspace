@@ -1,4 +1,5 @@
 #![feature(variant_count)]
+use frame_support::traits::fungible::InspectHold;
 use core::mem;
 use domain_runtime_primitives::BlockNumber as DomainBlockNumber;
 use domain_runtime_primitives::opaque::Header as DomainHeader;
@@ -16,7 +17,8 @@ use pallet_domains::runtime_registry::ScheduledRuntimeUpgrade;
 use pallet_domains::staking::{
     do_deregister_operator, do_mark_invalid_bundle_authors, do_mark_operators_as_slashed,
     do_nominate_operator, do_register_operator, do_reward_operators, do_unlock_funds,
-    do_unlock_nominator, do_unmark_invalid_bundle_authors, do_withdraw_stake, Operators,
+    do_unlock_nominator, do_unmark_invalid_bundle_authors, do_withdraw_stake,
+    OperatorStatus
 };
 use pallet_domains::staking_epoch::{do_finalize_domain_current_epoch, do_slash_operator};
 use pallet_domains::{
@@ -25,7 +27,7 @@ use pallet_domains::{
     DomainRuntimeUpgrades, ExecutionInbox, ExecutionReceiptOf, FraudProofError, FungibleHoldId,
     HeadDomainNumber, HeadReceiptNumber, MAX_NOMINATORS_TO_SLASH, NextDomainId, OperatorConfig,
     PendingSlashes, RawOrigin as DomainOrigin, RuntimeRegistry, ScheduledRuntimeUpgrades,
-    SlashedReason,
+    SlashedReason, Operators,
 };
 use pallet_subspace::NormalEraChange;
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
@@ -600,13 +602,6 @@ pub(crate) fn register_genesis_domain(creator: u128, operator_number: usize) -> 
         raw_genesis_storage,
     ));
 
-    let domain_id = NextDomainId::<Test>::get();
-    <Test as Config>::Currency::make_free_balance_be(
-        &creator,
-        <Test as Config>::DomainInstantiationDeposit::get()
-            + operator_number as u128 * <Test as Config>::MinOperatorStake::get()
-            + <Test as pallet_balances::Config>::ExistentialDeposit::get(),
-    );
     pallet_domains::Pallet::<Test>::instantiate_domain(
         RawOrigin::Signed(creator).into(),
         DomainConfigParams {
@@ -620,23 +615,8 @@ pub(crate) fn register_genesis_domain(creator: u128, operator_number: usize) -> 
         },
     )
     .unwrap();
-
-    /* let pair = OperatorPair::from_seed(&[0; 32]);
-    for _ in 0..operator_number {
-        pallet_domains::Pallet::<Test>::register_operator(
-            RawOrigin::Signed(creator).into(),
-            domain_id,
-            <Test as Config>::MinOperatorStake::get(),
-            OperatorConfig {
-                signing_key: pair.public(),
-                minimum_nominator_stake: AI3,
-                nomination_tax: 15.into(),
-            },
-        )
-        .unwrap();
-    } */
-    do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
-    domain_id
+    do_finalize_domain_current_epoch::<Test>(DOMAIN_ID).unwrap();
+    DOMAIN_ID
 }
 
 // Submit new head receipt to extend the block tree from the genesis block
@@ -754,35 +734,72 @@ enum FuzzAction {
 fn check_balance_conservation_invariant(
     operators: &[AccountId],
     nominators: &[AccountId],
+    initial_total: Balance,
     expected_reward_amount: Balance,
     expected_slash_amount: Balance,
 ) {
+    // Include account 1 (domain creator) in our calculations
+    let domain_creator: AccountId = 1;
+    
     // Calculate total free balances of all accounts
     let mut total_free_balance = 0u128;
-    for account in operators.iter().chain(nominators.iter()) {
+    for account in operators.iter().chain(nominators.iter()).chain(std::iter::once(&domain_creator)) {
         total_free_balance += <Test as Config>::Currency::free_balance(account);
     }
     
-    // Calculate total staked amounts across all operators  
-    let mut total_staked = 0u128;
-    let mut operator_id = 0u64;
-    while let Some(operator) = Operators::<Test>::get(operator_id) {
-        total_staked += operator.current_total_stake;
-        operator_id += 1;
+    // Calculate total held balances (deposits and stakes)
+    let mut total_held = 0u128;
+    for account in operators.iter().chain(nominators.iter()).chain(std::iter::once(&domain_creator)) {
+        total_held += <Test as Config>::Currency::total_balance_on_hold(account);
     }
     
-    // Total tokens in system = free balances + staked amounts
-    let total_system_balance = total_free_balance + total_staked;
+    // Total tokens in system = free balances + held balances  
+    let total_system_balance = total_free_balance + total_held;
     
-    // Expected total = initial balances + rewards - slashes
-    // Initial: 1000 * AI3 per account (5 operators + 5 nominators = 10 accounts)
-    let expected_total = 10 * 1000 * AI3 + expected_reward_amount - expected_slash_amount;
+    // Expected total = initial system state + rewards - slashes
+    let expected_total = initial_total + expected_reward_amount - expected_slash_amount;
     
     assert_eq!(
         total_system_balance, expected_total,
-        "Balance conservation violated! System has {} but expected {}. Free: {}, Staked: {}",
-        total_system_balance, expected_total, total_free_balance, total_staked
+        "Balance conservation violated! System has {} but expected {}. Free: {}, Held: {}",
+        total_system_balance, expected_total, total_free_balance, total_held
     );
+}
+
+fn check_stake_consistency_invariant() {
+    let mut operator_id = 0u64;
+    
+    // Check each operator's stake/shares consistency
+    while let Some(operator) = Operators::<Test>::get(operator_id) {
+        /* let mut calculated_total_shares = 0u128;
+        
+        // Verify total shares consistency
+        assert_eq!(
+            calculated_total_shares, 
+            operator.current_total_shares.into(),
+            "Share consistency violated for operator {}! Calculated shares: {}, Stored shares: {}",
+            operator_id, calculated_total_shares, operator.current_total_shares.into()
+        ); */
+        
+        // Verify stake > 0 implies shares > 0 and vice versa
+        if operator.current_total_stake > 0u128.into() {
+            assert!(
+                operator.current_total_shares > 0u128.into(),
+                "Stake > 0 but shares = 0 for operator {}", 
+                operator_id
+            );
+        }
+        
+        if operator.current_total_shares > 0u128.into() {
+            assert!(
+                operator.current_total_stake > 0u128.into(),
+                "Shares > 0 but stake = 0 for operator {}", 
+                operator_id
+            );
+        }
+        
+        operator_id += 1;
+    }
 }
 
 fn main() {
@@ -798,28 +815,43 @@ fn main() {
                 <Test as Config>::Currency::make_free_balance_be(&nominator, 1000 * AI3);
             }
             for operator in &operators {
-                <Test as Config>::Currency::make_free_balance_be(&operator, 1000 * AI3);
+                <Test as Config>::Currency::make_free_balance_be(&operator, 10000 * AI3);
             }
             let domain_id = register_genesis_domain(1, 1);
             for operator_owner in &operators {
                 let minimum_nominator_stake = (10 * AI3 + 10 as u128 * AI3);
-                let pair = OperatorPair::from_seed(&[0u8; 32]);
+                let pair = OperatorPair::from_seed(&[*operator_owner as u8; 32]);
                 let config = OperatorConfig {
                     signing_key: pair.public(),
                     minimum_nominator_stake,
                     nomination_tax: sp_runtime::Percent::from_percent(60),
                 };
-                let res = do_register_operator::<Test>(*operator_owner, 0.into(), 200, config);
+                let res = do_register_operator::<Test>(*operator_owner, 0.into(), 200 * AI3, config);
+                debug_assert!(res.is_ok()); 
                 #[cfg(not(feature = "fuzzing"))]
                 println!("{:?}", res);
             }
             #[cfg(not(feature = "fuzzing"))]
             println!("Done with operators");
+            
+            /* let mut total_rewards_given = 0u128;
+            let mut total_slashes_applied = 0u128;
+            
+            // Capture initial total balance after setup
+            let domain_creator: AccountId = 1;
+            let mut initial_total = 0u128;
+            for account in operators.iter().chain(nominators.iter()).chain(std::iter::once(&domain_creator)) {
+                initial_total += <Test as Config>::Currency::free_balance(account);
+                initial_total += <Test as Config>::Currency::total_balance_on_hold(account);
+            } */
+            
             for action in actions.into_iter() {
+                #[cfg(not(feature = "fuzzing"))]
                 println!("--> {:?}", action);
                 match action {
                     FuzzAction::Finalize => {
                         let res = do_finalize_domain_current_epoch::<Test>(domain_id);
+                        #[cfg(not(feature = "fuzzing"))]
                         println!("{:?}", res);
                         debug_assert!(res.is_ok());
                     }
@@ -861,13 +893,15 @@ fn main() {
                         let operator = operators
                             .get(operator_id as usize % operators.len())
                             .unwrap();
+                        let reward_amount = 100 * AI3;
                         do_reward_operators::<Test>(
                             domain_id,
                             OperatorRewardSource::Dummy,
                             vec![*operator as u64].into_iter(),
-                            100 * AI3,
+                            reward_amount,
                         )
-                        .unwrap()
+                        .unwrap();
+/*                         total_rewards_given += reward_amount; */
                     }
                     FuzzAction::SlashOperator { operator_id } => {
                         let operator = operators
@@ -927,6 +961,7 @@ fn main() {
                         };
                         let res =
                             do_mark_operators_as_slashed::<Test>(vec![operator_ids], slash_reason);
+/*                         total_slashes_applied += 320 * AI3; */
                         #[cfg(not(feature = "fuzzing"))]
                         println!("{:?}", res);
                     }
@@ -948,6 +983,15 @@ fn main() {
                         println!("{:?}", res);
                     }
                 }
+                
+                /* // Check balance conservation invariant after each action
+                check_balance_conservation_invariant(
+                    &operators, 
+                    &nominators,
+                    initial_total,
+                    total_rewards_given, 
+                    total_slashes_applied
+                ); */
             }
         });
     });
