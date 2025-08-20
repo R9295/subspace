@@ -237,6 +237,7 @@ pub fn do_finalize_domain_epoch_staking<T: Config>(
         let mut total_domain_stake = BalanceOf::<T>::zero();
         let mut current_operators = BTreeMap::new();
         let mut next_operators = BTreeSet::new();
+        /*         println!("{:?}", stake_summary.next_operators); */
         for next_operator_id in &stake_summary.next_operators {
             // If an operator is pending to slash then similar to the slashed operator it should not be added
             // into the `next_operators/current_operators` and we should not `do_finalize_operator_epoch_staking`
@@ -328,6 +329,7 @@ pub fn do_finalize_operator_epoch_staking<T: Config>(
     previous_epoch: EpochIndex,
     check_status: bool,
 ) -> Result<(BalanceOf<T>, bool), TransitionError> {
+    /*     println!("{:?}", operator_id); */
     let mut operator = match Operators::<T>::get(operator_id) {
         Some(op) => op,
         None => return Err(TransitionError::UnknownOperator),
@@ -447,7 +449,7 @@ pub fn do_slash_operator<T: Config>(
         .ok_or(TransitionError::DomainNotInitialized)?
         .current_epoch_index;
 
-    Operators::<T>::try_mutate_exists(operator_id, |maybe_operator| {
+    let res = Operators::<T>::try_mutate_exists(operator_id, |maybe_operator| {
         // take the operator so this operator info is removed once we slash the operator.
         let mut operator = maybe_operator
             .take()
@@ -596,6 +598,7 @@ pub fn do_slash_operator<T: Config>(
                 break;
             }
         }
+        debug_assert!(Operators::<T>::get(operator_id).is_some());
 
         // The operator state is safe to cleanup if there is no entry in `Deposits` and `Withdrawals`
         // which means all nominator (including the operator owner) have been slashed.
@@ -616,9 +619,10 @@ pub fn do_slash_operator<T: Config>(
             operator.total_storage_fee_deposit = total_storage_fee_deposit;
             *maybe_operator = Some(operator);
         }
-
         Ok(slashed_nominator_count)
-    })
+    });
+    /*     debug_assert!(Operators::<T>::get(operator_id).is_some()); */
+    res
 }
 
 #[cfg(test)]

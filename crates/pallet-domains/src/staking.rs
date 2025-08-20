@@ -51,9 +51,11 @@ impl SharePrice {
     ) -> Result<Self, Error> {
         if total_shares > total_stake.into() {
             // Invalid share price, can't be greater than one.
+            debug_assert!(false);
             Err(Error::ShareOverflow)
         } else if total_stake.is_zero() || total_shares.is_zero() {
             // If there are no shares or no stake, we can't construct a zero share price.
+            debug_assert!(false);
             Err(Error::ZeroSharePrice)
         } else {
             Ok(SharePrice(Perquintill::from_rational(
