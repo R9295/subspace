@@ -1263,7 +1263,6 @@ pub fn do_unlock_nominator<T: Config>(
             do_cleanup_operator::<T>(operator_id, total_stake)?
         } else {
             // set update total shares, total stake and total storage fee deposit for operator
-            println!("updated3");
             operator.current_total_shares = total_shares;
             operator.current_total_stake = total_stake;
             operator.total_storage_fee_deposit = total_storage_fee_deposit;
@@ -1522,7 +1521,7 @@ pub fn do_unmark_invalid_bundle_authors<T: Config>(
     Ok(())
 }
 
-fn unmark_invalid_bundle_author<T: Config>(
+pub fn unmark_invalid_bundle_author<T: Config>(
     operator_id: OperatorId,
     er_hash: ReceiptHashFor<T>,
     stake_summary: &mut StakingSummary<OperatorId, BalanceOf<T>>,

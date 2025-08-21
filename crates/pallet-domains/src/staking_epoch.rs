@@ -144,18 +144,29 @@ pub fn operator_take_reward_tax_and_stake<T: Config>(
 
                 // calculate operator tax, mint the balance, and stake them
                 let operator_tax_amount = operator.nomination_tax.mul_floor(reward);
+                
+                // Add the remaining rewards to the operator's `current_total_stake` FIRST
+                // This ensures the share price used for operator tax deposit calculation
+                // reflects the correct post-reward value, fixing the share price calculation bug
+                let rewards = reward
+                    .checked_sub(&operator_tax_amount)
+                    .ok_or(TransitionError::BalanceUnderflow)?;
+
+                operator.current_total_stake = operator
+                    .current_total_stake
+                    .checked_add(&rewards)
+                    .ok_or(TransitionError::BalanceOverflow)?;
+
                 if !operator_tax_amount.is_zero() {
                     let nominator_id = OperatorIdOwner::<T>::get(operator_id)
                         .ok_or(TransitionError::MissingOperatorOwner)?;
                     T::Currency::mint_into(&nominator_id, operator_tax_amount)
                         .map_err(|_| TransitionError::MintBalance)?;
-                    println!("{:?}", operator_tax_amount);
 
                     // Reserve for the bundle storage fund
                     let operator_tax_deposit =
                         deposit_reserve_for_storage_fund::<T>(operator_id, &nominator_id, operator_tax_amount)
                             .map_err(TransitionError::BundleStorageFund)?;
-                    println!("{:?}", operator_tax_deposit);
                     crate::staking::hold_deposit::<T>(
                         &nominator_id,
                         operator_id,
@@ -190,17 +201,6 @@ pub fn operator_take_reward_tax_and_stake<T: Config>(
 
                     operators_with_self_deposits.insert(operator_id);
                 }
-
-                // Add the remaining rewards to the operator's `current_total_stake` which increases the
-                // share price of the staking pool and as a way to distribute the reward to the nominator
-                let rewards = reward
-                    .checked_sub(&operator_tax_amount)
-                    .ok_or(TransitionError::BalanceUnderflow)?;
-
-                operator.current_total_stake = operator
-                    .current_total_stake
-                    .checked_add(&rewards)
-                    .ok_or(TransitionError::BalanceOverflow)?;
                 rewarded_operator_count += 1;
 
                 Ok(())
@@ -348,8 +348,6 @@ pub fn do_finalize_operator_epoch_staking<T: Config>(
     let mut total_stake = operator.current_total_stake;
     let mut total_shares = operator.current_total_shares;
     let share_price = SharePrice::new::<T>(total_shares, total_stake)?;
-    println!("{:#?}", operator);
-    println!("{:?} = {:?}; {:?} {:?}", operator_id, share_price, total_stake, total_shares);
 
     // calculate and subtract total withdrew shares from previous epoch
     if !operator.withdrawals_in_epoch.is_zero() {
@@ -616,7 +614,6 @@ pub fn do_slash_operator<T: Config>(
             }
         } else {
             // set update total shares, total stake and total storage fee deposit for operator
-            println!("updated2");
             operator.current_total_shares = total_shares;
             operator.current_total_stake = total_stake;
             operator.total_storage_fee_deposit = total_storage_fee_deposit;

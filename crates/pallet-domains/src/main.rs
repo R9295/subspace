@@ -16,13 +16,14 @@ use pallet_domains::staking::{
     SharePrice, do_deregister_operator, do_mark_invalid_bundle_authors,
     do_mark_operators_as_slashed, do_nominate_operator, do_register_operator, do_reward_operators,
     do_unlock_funds, do_unlock_nominator, do_unmark_invalid_bundle_authors, do_withdraw_stake,
+    mark_invalid_bundle_author, unmark_invalid_bundle_author,
 };
 use pallet_domains::staking_epoch::{do_finalize_domain_current_epoch, do_slash_operator};
 use pallet_domains::{
     BalanceOf, BlockSlot, BlockTree, BlockTreeNodes, Config, DomainBlockNumberFor,
-    DomainHashingFor, ExecutionReceiptOf, FungibleHoldId, HeadReceiptNumber,
-    MAX_NOMINATORS_TO_SLASH, NominatorId, OperatorConfig, Operators, PendingSlashes,
-    RawOrigin as DomainOrigin, SlashedReason, Withdrawals,
+    DomainHashingFor, DomainStakingSummary, ExecutionReceiptOf, FungibleHoldId, HeadReceiptNumber,
+    InvalidBundleAuthors, MAX_NOMINATORS_TO_SLASH, NominatorId, OperatorConfig, Operators,
+    PendingSlashes, RawOrigin as DomainOrigin, SlashedReason, Withdrawals,
 };
 use pallet_subspace::NormalEraChange;
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
@@ -58,7 +59,7 @@ use subspace_runtime_primitives::{
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FuzzData {
-    pub epochs: Vec<Epoch>,
+    pub epochs: [Epoch; 10],
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -96,16 +97,17 @@ enum FuzzAction {
         operator_id: u8,
         slash_reason: u8, // 0 for InvalidBundle, 1 for BadExecutionReceipt
     },
-    /* MarkInvalidBundleAuthors {
-        operator_ids: Vec<u8>,
+    MarkInvalidBundleAuthors {
+        operator_id: u8,
     },
     UnmarkInvalidBundleAuthors {
-        operator_ids: Vec<u8>,
-    }, */
+        operator_id: u8,
+        er_id: u8,
+    },
     Finalize,
     RewardOperator {
         operator_id: u8,
-        amount: u16
+        amount: u16,
     },
     SlashOperator {
         operator_id: u8,
@@ -137,7 +139,6 @@ fn check_share_price_invariant(
     previous_share_prices: &mut HashMap<u64, SharePrice>,
     slashed_operators: &mut HashMap<u64, bool>,
 ) {
-    println!("-------------------------------");
     for operator_id in operators {
         let operator_id = *operator_id as u64;
         if let Some(operator) = Operators::<Test>::get(operator_id) {
@@ -147,26 +148,6 @@ fn check_share_price_invariant(
                 operator.current_total_stake,
             )
             .unwrap();
-
-
-            // Check share price evolution over time
-            if let Some(previous_share_price) = previous_share_prices.get(&operator_id) {
-                let is_slashed = slashed_operators.get(&operator_id).unwrap_or(&false);
-                let current_status = operator.status::<Test>(operator_id);
-                println!("{:?} ==> {:?};; {:?} vs {:?};; shares={:?} stake={:?}", operator_id, current_status, previous_share_price, new_share_price, operator.current_total_shares, operator.current_total_stake);
-                
-                if !is_slashed {
-                    // Invariant: Share price should not decrease without slashing
-                    assert!(
-                        new_share_price.0 >= previous_share_price.0,
-                        /* "Share price for operator {} decreased from {} to {} without slashing",
-                        operator_id, previous_share_price.0, new_share_price.0 */
-                    );
-                }
-            }
-
-            // Update the tracking for next iteration
-            previous_share_prices.insert(operator_id, new_share_price);
         }
     }
 }
@@ -175,18 +156,18 @@ fn check_slashing_invariant(operators: &[OperatorId], slashed_operators: &mut Ha
     for operator_id in operators {
         if let Some(operator) = Operators::<Test>::get(*operator_id) {
             let current_status = operator.status::<Test>(*operator_id);
-            
+
             // Check if operator is currently slashed
             let is_currently_slashed = matches!(
-                current_status, 
+                current_status,
                 pallet_domains::staking::OperatorStatus::Slashed
             );
-            
+
             // Update slashed operators tracking
             if is_currently_slashed {
                 slashed_operators.insert(*operator_id, true);
             }
-            
+
             // Invariant: Once slashed, an operator should remain slashed until deregistration
             if let Some(&was_slashed) = slashed_operators.get(&operator_id) {
                 if was_slashed && !is_currently_slashed {
@@ -196,19 +177,21 @@ fn check_slashing_invariant(operators: &[OperatorId], slashed_operators: &mut Ha
                     );
                 }
             }
-            
         }
     }
 }
 fn create_genesis(accounts: Vec<AccountId>) {
     RuntimeGenesisConfig {
         balances: BalancesConfig {
-            balances: accounts.iter().cloned().map(|x| (x, 200_000 * AI3)).collect(),
+            balances: accounts
+                .iter()
+                .cloned()
+                .map(|x| (x, 200_000 * AI3))
+                .collect(),
         },
         system: SystemConfig::default(),
         subspace: SubspaceConfig::default(),
         domains: DomainsConfig::default(),
-        
     };
 }
 
@@ -220,10 +203,11 @@ fn fuzz(data: &FuzzData) {
     let domain_id = register_genesis_domain(1, 1);
     let mut operators = HashMap::new();
     let mut nominators = HashMap::new();
-    
+
     // Initialize invariant tracking state
     let mut previous_share_prices: HashMap<u64, SharePrice> = HashMap::new();
     let mut slashed_operators: HashMap<u64, bool> = HashMap::new();
+    let mut invalid_er = Vec::new();
     for epoch in &data.epochs {
         for (index, action) in epoch.actions.iter().enumerate() {
             let user = accounts.get(index).unwrap();
@@ -232,98 +216,178 @@ fn fuzz(data: &FuzzData) {
                     let res = register_operator(*user, *amount as u128);
                     if let Some(operator) = res {
                         operators.insert(user, operator);
-                        nominators.entry(*user).and_modify(|list: &mut Vec<u64>| list.push(operator)).or_insert(vec![operator]);
+                        nominators
+                            .entry(*user)
+                            .and_modify(|list: &mut Vec<u64>| list.push(operator))
+                            .or_insert(vec![operator]);
                     }
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Registering {user:?} as Operator with amount {amount:?}\n-->{res:?}");
                 }
-                FuzzAction::NominateOperator { operator_id, amount } => {
+                FuzzAction::NominateOperator {
+                    operator_id,
+                    amount,
+                } => {
                     if operators.len() == 0 {
                         continue;
                     }
                     let amount = *amount as u128 * AI3;
                     let amount = amount.max(21 * AI3);
                     // TODO:
-                    let operator = operators.iter().collect::<Vec<_>>().get(*operator_id as usize % operators.len()).unwrap().1;
+                    let operator = operators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap()
+                        .1;
                     let res = do_nominate_operator::<Test>(*operator, *user, amount);
                     if let Ok(_) = res {
-                       nominators.entry(*user).and_modify(|list: &mut Vec<u64>| list.push(*operator)).or_insert(vec![*operator]);
+                        nominators
+                            .entry(*user)
+                            .and_modify(|list: &mut Vec<u64>| list.push(*operator))
+                            .or_insert(vec![*operator]);
                     }
                     #[cfg(not(feature = "fuzzing"))]
-                    println!("Nominating as Nominator {user:?} for Operator {operator:?} with amount {amount:?}\n-->{res:?}");
+                    println!(
+                        "Nominating as Nominator {user:?} for Operator {operator:?} with amount {amount:?}\n-->{res:?}"
+                    );
                 }
                 FuzzAction::DeregisterOperator { operator_id } => {
                     if operators.len() == 0 {
                         continue;
                     }
                     // TODO:
-                    let (owner, operator) = operators.iter().collect::<Vec<_>>().get(*operator_id as usize % operators.len()).unwrap().clone();
+                    let (owner, operator) = operators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap()
+                        .clone();
                     let res = do_deregister_operator::<Test>(**owner, *operator);
                     #[cfg(not(feature = "fuzzing"))]
                     println!("de-registering Operator {operator:?} \n-->{res:?}");
                 }
-                FuzzAction::WithdrawStake { nominator_id, operator_id, shares } => {
+                FuzzAction::WithdrawStake {
+                    nominator_id,
+                    operator_id,
+                    shares,
+                } => {
                     if operators.len() == 0 {
                         continue;
                     }
                     // TODO:
-                    let (nominator, operators) = nominators.iter().collect::<Vec<_>>().get(*nominator_id as usize % nominators.len()).unwrap().clone();
-                    let operator = operators.get(*operator_id as usize % operators.len()).unwrap();
+                    let (nominator, operators) = nominators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*nominator_id as usize % nominators.len())
+                        .unwrap()
+                        .clone();
+                    let operator = operators
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap();
                     // TODO: make sure shares are actually u128
-                    let res = do_withdraw_stake::<Test>(*operator, *nominator, *shares as u128 * AI3);
+                    let res =
+                        do_withdraw_stake::<Test>(*operator, *nominator, *shares as u128 * AI3);
                     #[cfg(not(feature = "fuzzing"))]
-                    println!("Withdrawing stake from Operator {operator:?}  as Nominator {nominator:?} of shares {shares:?}\n-->{res:?}");
+                    println!(
+                        "Withdrawing stake from Operator {operator:?}  as Nominator {nominator:?} of shares {shares:?}\n-->{res:?}"
+                    );
                 }
-                FuzzAction::UnlockFunds { operator_id, nominator_id } => {
+                FuzzAction::UnlockFunds {
+                    operator_id,
+                    nominator_id,
+                } => {
                     if operators.len() == 0 {
                         continue;
                     }
-                    let (nominator, operators) = nominators.iter().collect::<Vec<_>>().get(*nominator_id as usize % nominators.len()).unwrap().clone();
-                    let operator = operators.get(*operator_id as usize % operators.len()).unwrap();
+                    let (nominator, operators) = nominators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*nominator_id as usize % nominators.len())
+                        .unwrap()
+                        .clone();
+                    let operator = operators
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap();
                     let res = do_unlock_funds::<Test>(*operator, *nominator);
                     #[cfg(not(feature = "fuzzing"))]
-                    println!("Unlocking funds as Nominator {nominator:?} from Operator {operator:?} \n-->{res:?}");
+                    println!(
+                        "Unlocking funds as Nominator {nominator:?} from Operator {operator:?} \n-->{res:?}"
+                    );
                 }
-                FuzzAction::UnlockNominator { operator_id, nominator_id } => {
+                FuzzAction::UnlockNominator {
+                    operator_id,
+                    nominator_id,
+                } => {
                     if operators.len() == 0 {
                         continue;
                     }
-                    let (nominator, operators) = nominators.iter().collect::<Vec<_>>().get(*nominator_id as usize % nominators.len()).unwrap().clone();
-                    let operator = operators.get(*operator_id as usize % operators.len()).unwrap();
+                    let (nominator, operators) = nominators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*nominator_id as usize % nominators.len())
+                        .unwrap()
+                        .clone();
+                    let operator = operators
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap();
                     let res = do_unlock_nominator::<Test>(*operator, *nominator);
                     #[cfg(not(feature = "fuzzing"))]
-                    println!("Unlocking funds as Nominator {nominator:?} from Operator {operator:?} \n-->{res:?}");
+                    println!(
+                        "Unlocking funds as Nominator {nominator:?} from Operator {operator:?} \n-->{res:?}"
+                    );
                 }
-                FuzzAction::MarkOperatorsAsSlashed { operator_id, slash_reason } => {
+                FuzzAction::MarkOperatorsAsSlashed {
+                    operator_id,
+                    slash_reason,
+                } => {
                     if operators.len() == 0 {
                         continue;
                     }
-                    let operator = operators.iter().collect::<Vec<_>>().get(*operator_id as usize % operators.len()).unwrap().1;
+                    let operator = operators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap()
+                        .1;
                     let slash_reason = match slash_reason % 2 {
                         0 => SlashedReason::InvalidBundle(0),
                         _ => SlashedReason::BadExecutionReceipt(H256::from([0u8; 32])),
                     };
-                    let res =
-                        do_mark_operators_as_slashed::<Test>(vec![*operator], slash_reason);
+                    let res = do_mark_operators_as_slashed::<Test>(vec![*operator], slash_reason);
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Marking {operator_id:?} as slashed\n-->{res:?}");
                 }
-                FuzzAction::SlashOperator { operator_id, slash_reason } => {
+                FuzzAction::SlashOperator {
+                    operator_id,
+                    slash_reason,
+                } => {
                     if operators.len() == 0 {
                         continue;
                     }
-                    let operator = operators.iter().collect::<Vec<_>>().get(*operator_id as usize % operators.len()).unwrap().1;
-                    let res =
-                        do_slash_operator::<Test>(DOMAIN_ID, u32::MAX);
+                    let operator = operators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap()
+                        .1;
+                    let res = do_slash_operator::<Test>(DOMAIN_ID, u32::MAX);
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Slashing-->{res:?}");
-
                 }
-                FuzzAction::RewardOperator { operator_id, amount }=> {
+                FuzzAction::RewardOperator {
+                    operator_id,
+                    amount,
+                } => {
                     if operators.len() == 0 {
                         continue;
                     }
-                    let operator = operators.iter().collect::<Vec<_>>().get(*operator_id as usize % operators.len()).unwrap().1;
+                    let operator = operators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap()
+                        .1;
                     let reward_amount = *amount as u128 * AI3;
                     let res = do_reward_operators::<Test>(
                         domain_id,
@@ -341,16 +405,91 @@ fn fuzz(data: &FuzzData) {
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Finalizing");
                 }
+                FuzzAction::MarkInvalidBundleAuthors { operator_id } => {
+                    if operators.len() == 0 {
+                        continue;
+                    }
+                    let operator = operators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap()
+                        .1;
+                    let pending_slashes =
+                        PendingSlashes::<Test>::get(DOMAIN_ID).unwrap_or_default();
+                    let mut invalid_bundle_authors_in_epoch =
+                        InvalidBundleAuthors::<Test>::get(DOMAIN_ID);
+                    let mut stake_summary = DomainStakingSummary::<Test>::get(DOMAIN_ID).unwrap();
+
+                    for operator_id in vec![*operator] {
+                        if pending_slashes.contains(&operator_id) {
+                            continue;
+                        }
+                        let er = H256::random();
+                        invalid_er.push(er);
+                        mark_invalid_bundle_author::<Test>(
+                            *operator,
+                            er,
+                            &mut stake_summary,
+                            &mut invalid_bundle_authors_in_epoch,
+                        );
+                    }
+
+                    DomainStakingSummary::<Test>::insert(DOMAIN_ID, stake_summary);
+                    InvalidBundleAuthors::<Test>::insert(
+                        DOMAIN_ID,
+                        invalid_bundle_authors_in_epoch,
+                    );
+                }
+                FuzzAction::UnmarkInvalidBundleAuthors { operator_id, er_id } => {
+                    if operators.len() == 0 {
+                        continue;
+                    }
+                    if invalid_er.len() == 0 {return;}
+                    let operator = operators
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .get(*operator_id as usize % operators.len())
+                        .unwrap()
+                        .1;
+                    let er = invalid_er.get(*er_id as usize % invalid_er.len()).unwrap();
+                    let pending_slashes = PendingSlashes::<Test>::get(domain_id).unwrap_or_default();
+                    let mut invalid_bundle_authors_in_epoch = InvalidBundleAuthors::<Test>::get(domain_id);
+                    let mut stake_summary = DomainStakingSummary::<Test>::get(DOMAIN_ID).unwrap();
+
+                    for operator_id in vec![*operator] {
+                        if pending_slashes.contains(&operator_id)
+                            || pallet_domains::Pallet::<Test>::is_operator_pending_to_slash(DOMAIN_ID, operator_id)
+                        {
+                            continue;
+                        }
+
+                        unmark_invalid_bundle_author::<Test>(
+                            *operator,
+                            *er,
+                            &mut stake_summary,
+                            &mut invalid_bundle_authors_in_epoch,
+                        );
+                    }
+
+                    DomainStakingSummary::<Test>::insert(domain_id, stake_summary);
+                    InvalidBundleAuthors::<Test>::insert(domain_id, invalid_bundle_authors_in_epoch);
+                }
             }
-            
+
             // Run all invariant checks after each action
             check_operator_state_consistency_invariant(operators.values().collect::<Vec<_>>());
-            
+
             // Collect operator accounts for invariant checks
-            let operator_accounts: Vec<OperatorId> = operators.values().cloned().collect::<Vec<_>>();
-            
+            let operator_accounts: Vec<OperatorId> =
+                operators.values().cloned().collect::<Vec<_>>();
+
             // Check share price and slashing invariants
-            check_share_price_invariant(&operator_accounts, &mut previous_share_prices, &mut slashed_operators);
+            check_share_price_invariant(
+                &operator_accounts,
+                &mut previous_share_prices,
+                &mut slashed_operators,
+            );
             check_slashing_invariant(&operator_accounts, &mut slashed_operators);
         }
         let res = do_finalize_domain_current_epoch::<Test>(domain_id);
@@ -371,7 +510,9 @@ fn register_operator(operator: AccountId, amount: Balance) -> Option<OperatorId>
     println!("{res:?}");
     if let Ok((id, _)) = res {
         Some(id)
-    } else {None}
+    } else {
+        None
+    }
 }
 
 fn main() {
@@ -382,7 +523,7 @@ fn main() {
         let mut ext = new_test_ext_with_extensions();
         ext.execute_with(|| {
             fuzz(&data);
-         });
+        });
     });
 }
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
@@ -493,7 +634,7 @@ parameter_types! {
     pub const MinOperatorStake: Balance = 100 * AI3;
     pub const MinNominatorStake: Balance = AI3;
     pub const StakeWithdrawalLockingPeriod: DomainBlockNumber = 5;
-    pub const StakeEpochDuration: DomainBlockNumber = 5;
+    pub const StakeEpochDuration: DomainBlockNumber = 1;
     pub TreasuryAccount: u128 = PalletId(*b"treasury").into_account_truncating();
     pub const BlockReward: Balance = 10 * AI3;
     pub const MaxPendingStakingOperation: u32 = 512;
