@@ -133,41 +133,70 @@ fn check_operator_state_consistency_invariant(operators: Vec<&OperatorId>) {
 }
 
 fn check_share_price_invariant(
-    operators: &[AccountId],
+    operators: &[OperatorId],
     previous_share_prices: &mut HashMap<u64, SharePrice>,
     slashed_operators: &mut HashMap<u64, bool>,
 ) {
+    println!("-------------------------------");
     for operator_id in operators {
         let operator_id = *operator_id as u64;
         if let Some(operator) = Operators::<Test>::get(operator_id) {
+            // Calculate current share price
             let new_share_price = SharePrice::new::<Test>(
                 operator.current_total_shares,
                 operator.current_total_stake,
             )
-            .unwrap_or_else(|_| SharePrice::one());
+            .unwrap();
 
+
+            // Check share price evolution over time
             if let Some(previous_share_price) = previous_share_prices.get(&operator_id) {
-                if !slashed_operators.get(&operator_id).unwrap_or(&false) {
+                let is_slashed = slashed_operators.get(&operator_id).unwrap_or(&false);
+                let current_status = operator.status::<Test>(operator_id);
+                println!("{:?} ==> {:?};; {:?} vs {:?};; shares={:?} stake={:?}", operator_id, current_status, previous_share_price, new_share_price, operator.current_total_shares, operator.current_total_stake);
+                
+                if !is_slashed {
+                    // Invariant: Share price should not decrease without slashing
                     assert!(
                         new_share_price.0 >= previous_share_price.0,
-                        "Share price for operator {operator_id} decreased without slashing"
+                        /* "Share price for operator {} decreased from {} to {} without slashing",
+                        operator_id, previous_share_price.0, new_share_price.0 */
                     );
                 }
             }
+
+            // Update the tracking for next iteration
             previous_share_prices.insert(operator_id, new_share_price);
         }
     }
 }
 
-fn check_slashing_invariant(operators: &[AccountId], slashed_operators: &mut HashMap<u64, bool>) {
+fn check_slashing_invariant(operators: &[OperatorId], slashed_operators: &mut HashMap<u64, bool>) {
     for operator_id in operators {
-        let operator_id = *operator_id as u64;
-        if let Some(operator) = Operators::<Test>::get(operator_id) {
-            if let pallet_domains::staking::OperatorStatus::Slashed =
-                operator.status::<Test>(operator_id)
-            {
-                slashed_operators.insert(operator_id, true);
+        if let Some(operator) = Operators::<Test>::get(*operator_id) {
+            let current_status = operator.status::<Test>(*operator_id);
+            
+            // Check if operator is currently slashed
+            let is_currently_slashed = matches!(
+                current_status, 
+                pallet_domains::staking::OperatorStatus::Slashed
+            );
+            
+            // Update slashed operators tracking
+            if is_currently_slashed {
+                slashed_operators.insert(*operator_id, true);
             }
+            
+            // Invariant: Once slashed, an operator should remain slashed until deregistration
+            if let Some(&was_slashed) = slashed_operators.get(&operator_id) {
+                if was_slashed && !is_currently_slashed {
+                    panic!(
+                        "Invariant violation: Operator {} was previously slashed but is no longer slashed without deregistration",
+                        operator_id
+                    );
+                }
+            }
+            
         }
     }
 }
@@ -191,6 +220,10 @@ fn fuzz(data: &FuzzData) {
     let domain_id = register_genesis_domain(1, 1);
     let mut operators = HashMap::new();
     let mut nominators = HashMap::new();
+    
+    // Initialize invariant tracking state
+    let mut previous_share_prices: HashMap<u64, SharePrice> = HashMap::new();
+    let mut slashed_operators: HashMap<u64, bool> = HashMap::new();
     for epoch in &data.epochs {
         for (index, action) in epoch.actions.iter().enumerate() {
             let user = accounts.get(index).unwrap();
@@ -304,17 +337,21 @@ fn fuzz(data: &FuzzData) {
                 }
                 FuzzAction::Finalize => {
                     let res = do_finalize_domain_current_epoch::<Test>(domain_id);
+                    assert!(res.is_ok());
+                    #[cfg(not(feature = "fuzzing"))]
+                    println!("Finalizing");
                 }
             }
+            
+            // Run all invariant checks after each action
             check_operator_state_consistency_invariant(operators.values().collect::<Vec<_>>());
-            /* let all_accounts: Vec<AccountId> = operators.iter().chain(nominators.iter()).chain(std::iter::once(&1u128)).cloned().collect();
-            check_total_supply_invariant(&all_accounts, &operators);
-            check_treasury_balance_invariant(previous_treasury_balance);
-            check_share_price_invariant(&operators, &mut previous_share_prices, &mut slashed_operators);
-            check_slashing_invariant(&operators, &mut slashed_operators);
-
-            // Update treasury balance for next iteration
-                } */
+            
+            // Collect operator accounts for invariant checks
+            let operator_accounts: Vec<OperatorId> = operators.values().cloned().collect::<Vec<_>>();
+            
+            // Check share price and slashing invariants
+            check_share_price_invariant(&operator_accounts, &mut previous_share_prices, &mut slashed_operators);
+            check_slashing_invariant(&operator_accounts, &mut slashed_operators);
         }
         let res = do_finalize_domain_current_epoch::<Test>(domain_id);
         assert!(res.is_ok());

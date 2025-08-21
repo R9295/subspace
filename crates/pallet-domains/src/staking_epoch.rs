@@ -149,12 +149,13 @@ pub fn operator_take_reward_tax_and_stake<T: Config>(
                         .ok_or(TransitionError::MissingOperatorOwner)?;
                     T::Currency::mint_into(&nominator_id, operator_tax_amount)
                         .map_err(|_| TransitionError::MintBalance)?;
+                    println!("{:?}", operator_tax_amount);
 
                     // Reserve for the bundle storage fund
                     let operator_tax_deposit =
                         deposit_reserve_for_storage_fund::<T>(operator_id, &nominator_id, operator_tax_amount)
                             .map_err(TransitionError::BundleStorageFund)?;
-
+                    println!("{:?}", operator_tax_deposit);
                     crate::staking::hold_deposit::<T>(
                         &nominator_id,
                         operator_id,
@@ -200,7 +201,6 @@ pub fn operator_take_reward_tax_and_stake<T: Config>(
                     .current_total_stake
                     .checked_add(&rewards)
                     .ok_or(TransitionError::BalanceOverflow)?;
-
                 rewarded_operator_count += 1;
 
                 Ok(())
@@ -348,6 +348,8 @@ pub fn do_finalize_operator_epoch_staking<T: Config>(
     let mut total_stake = operator.current_total_stake;
     let mut total_shares = operator.current_total_shares;
     let share_price = SharePrice::new::<T>(total_shares, total_stake)?;
+    println!("{:#?}", operator);
+    println!("{:?} = {:?}; {:?} {:?}", operator_id, share_price, total_stake, total_shares);
 
     // calculate and subtract total withdrew shares from previous epoch
     if !operator.withdrawals_in_epoch.is_zero() {
@@ -386,6 +388,7 @@ pub fn do_finalize_operator_epoch_staking<T: Config>(
     );
 
     // update operator state
+    println!("updated1");
     operator.current_total_shares = total_shares;
     operator.current_total_stake = total_stake;
     Operators::<T>::set(operator_id, Some(operator));
@@ -613,6 +616,7 @@ pub fn do_slash_operator<T: Config>(
             }
         } else {
             // set update total shares, total stake and total storage fee deposit for operator
+            println!("updated2");
             operator.current_total_shares = total_shares;
             operator.current_total_stake = total_stake;
             operator.total_storage_fee_deposit = total_storage_fee_deposit;
@@ -1126,5 +1130,80 @@ mod tests {
 
             assert_eq!(get_current_epoch(), 4);
         })
+    }
+
+    #[test]
+    fn poc() {
+        let domain_id = DomainId::new(0);
+        let operator_account = 1;
+        let pair = OperatorPair::from_seed(&[0; 32]);
+        let initial_stake = 100 * AI3;
+        let reward_amount = 50 * AI3;
+        
+        let mut ext = new_test_ext();
+        ext.execute_with(|| {
+            // Register operator with some initial stake
+            let (operator_id, _) = register_operator(
+                domain_id,
+                operator_account,
+                200 * AI3,
+                initial_stake,
+                10 * AI3,
+                pair.public(),
+                Percent::from_parts(60), // 60% nomination tax
+                BTreeMap::default(),
+            );
+
+            do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
+            
+            // Get initial share price
+            let operator = Operators::<Test>::get(operator_id).unwrap();
+            let initial_share_price = crate::staking::SharePrice::new::<Test>(
+                operator.current_total_shares,
+                operator.current_total_stake,
+            ).unwrap();
+            
+            // Add rewards to trigger the bug
+            do_reward_operators::<Test>(
+                domain_id,
+                OperatorRewardSource::Dummy,
+                vec![operator_id].into_iter(),
+                reward_amount,
+            ).unwrap();
+
+            // Take operator tax and stake it - this is where the bug occurs
+            operator_take_reward_tax_and_stake::<Test>(domain_id).unwrap();
+            
+            // Get share price after reward processing but before finalization
+            let operator_after_tax = Operators::<Test>::get(operator_id).unwrap();
+            let share_price_after_tax = crate::staking::SharePrice::new::<Test>(
+                operator_after_tax.current_total_shares,
+                operator_after_tax.current_total_stake,
+            ).unwrap();
+            
+            // Finalize the epoch to process deposits
+            do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
+            
+            // Get final share price
+            let operator_final = Operators::<Test>::get(operator_id).unwrap();
+            let final_share_price = crate::staking::SharePrice::new::<Test>(
+                operator_final.current_total_shares,
+                operator_final.current_total_stake,
+            ).unwrap();
+            
+            // The bug: share price should never decrease without slashing
+            // But due to incorrect deposit share calculation, it does
+            println!("Initial share price: {:?}", initial_share_price);
+            println!("After tax share price: {:?}", share_price_after_tax);  
+            println!("Final share price: {:?}", final_share_price);
+            
+            // This assertion will fail due to the bug
+            assert!(
+                final_share_price.0 >= initial_share_price.0,
+                "Share price decreased from {:?} to {:?} without slashing - this violates economic invariants",
+                initial_share_price.0,
+                final_share_price.0
+            );
+        });
     }
 }

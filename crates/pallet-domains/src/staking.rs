@@ -51,11 +51,11 @@ impl SharePrice {
     ) -> Result<Self, Error> {
         if total_shares > total_stake.into() {
             // Invalid share price, can't be greater than one.
-            debug_assert!(false);
+           assert!(false);
             Err(Error::ShareOverflow)
         } else if total_stake.is_zero() || total_shares.is_zero() {
             // If there are no shares or no stake, we can't construct a zero share price.
-            debug_assert!(false);
+            assert!(false);
             Err(Error::ZeroSharePrice)
         } else {
             Ok(SharePrice(Perquintill::from_rational(
@@ -107,6 +107,7 @@ impl From<(DomainId, EpochIndex)> for DomainEpoch {
     }
 }
 
+#[derive(Debug)]
 pub struct NewDeposit<Balance> {
     pub staking: Balance,
     pub storage_fee_deposit: Balance,
@@ -1262,6 +1263,7 @@ pub fn do_unlock_nominator<T: Config>(
             do_cleanup_operator::<T>(operator_id, total_stake)?
         } else {
             // set update total shares, total stake and total storage fee deposit for operator
+            println!("updated3");
             operator.current_total_shares = total_shares;
             operator.current_total_stake = total_stake;
             operator.total_storage_fee_deposit = total_storage_fee_deposit;
@@ -2270,6 +2272,7 @@ pub mod tests {
     ///
     /// The user should never get more, and they shouldn't get significantly less.
     /// Accounts for both absolute and relative rounding errors.
+    #[macro_export]
     macro_rules! prop_assert_approx {
             ($actual:expr, $expected:expr $(,)?) => {
                 prop_assert_approx!($actual, $expected, "");
