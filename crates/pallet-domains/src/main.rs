@@ -276,7 +276,7 @@ fn main() {
                         let _ = 
                             do_nominate_operator::<Test>(*operator as u64, *nominator, amount);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Nominating as Nominator {nominator:?} for Operator {operator:?} with amount {amount:?}\n-->{{res:?}}");
+                        println!("Nominating as Nominator {nominator:?} for Operator {operator:?} with amount {amount:?}\n-->{res:?}");
                     }
                     FuzzAction::WithdrawStake {
                         operator_id,
@@ -292,7 +292,7 @@ fn main() {
                             .unwrap();
                         let _ = do_withdraw_stake::<Test>(*operator as u64, *nominator, shares);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Withdrawing stake from Operator {operator:?}  as Nominator {nominator:?} of shares {shares:?}\n-->{{res:?}}");
+                        println!("Withdrawing stake from Operator {operator:?}  as Nominator {nominator:?} of shares {shares:?}\n-->{res:?}");
                     }
                     FuzzAction::RewardOperator { operator_id } => {
                         let operator = operators
@@ -307,7 +307,7 @@ fn main() {
                         )
                         .unwrap();
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Rewarding operator {operator:?} with {reward_amount:?}\n-->{{res:?}}");
+                        println!("Rewarding operator {operator:?} with {reward_amount:?}\n-->{res:?}");
                     }
                     FuzzAction::SlashOperator { operator_id, slash_reason } => {
                         let operator = operators
@@ -319,10 +319,10 @@ fn main() {
                         };
                         let _ = do_mark_operators_as_slashed::<Test>(&vec![*operator as u64], slash_reason);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Marking {operator:?} as slashed\n-->{{res:?}}");
+                        println!("Marking {operator:?} as slashed\n-->{res:?}");
                         let _ = do_slash_operator::<Test>(DOMAIN_ID, MAX_NOMINATORS_TO_SLASH);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Slashing Operator {operator:?}\n-->{{res:?}}");
+                        println!("Slashing Operator {operator:?}\n-->{res:?}");
                     }
                     FuzzAction::UnlockFunds {
                         operator_id,
@@ -336,7 +336,7 @@ fn main() {
                             .unwrap();
                         let _ = do_unlock_funds::<Test>(*operator as u64, *nominator);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Unlocking funds as Nominator {nominator:?} from Operator {operator:?} \n-->{{res:?}}");
+                        println!("Unlocking funds as Nominator {nominator:?} from Operator {operator:?} \n-->{res:?}");
                     }
                     FuzzAction::UnlockNominator {
                         operator_id,
@@ -350,7 +350,7 @@ fn main() {
                             .unwrap();
                         let _ = do_unlock_nominator::<Test>(*operator as u64, *nominator);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Unlocking Nominator {nominator:?} from Operator {operator:?} \n-->{{res:?}}");
+                        println!("Unlocking Nominator {nominator:?} from Operator {operator:?} \n-->{res:?}");
                     }
                     FuzzAction::DeregisterOperator { operator_id } => {
                         let operator = operators
@@ -358,7 +358,7 @@ fn main() {
                             .unwrap();
                         let _ = do_deregister_operator::<Test>(*operator, *operator as u64);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("de-registering Operator {operator:?} \n-->{{res:?}}");
+                        println!("de-registering Operator {operator:?} \n-->{res:?}");
                     }
                     FuzzAction::MarkOperatorsAsSlashed {
                         operator_ids,
@@ -371,21 +371,21 @@ fn main() {
                         let _ = 
                             do_mark_operators_as_slashed::<Test>(vec![operator_ids], slash_reason);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Marking {operator_ids:?} as slashed\n-->{{res:?}}");
+                        println!("Marking {operator_ids:?} as slashed\n-->{res:?}");
                     }
                     FuzzAction::MarkInvalidBundleAuthors { operator_ids: _ } => {
                         /* let operators: Vec<u64> = 
                             operator_ids.into_iter().map(|id| id as u64).collect();
                         let res = do_mark_invalid_bundle_authors::<Test>(&operators);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Marking operators {{:?}} as invalid bundle authors\n-->{{:?}}", operators, res); */
+                        println!("Marking operators {:?} as invalid bundle authors\n-->{:?}", operators, res); */
                     }
                     FuzzAction::UnmarkInvalidBundleAuthors { operator_ids: _ } => {
                         /* let operators: Vec<u64> = 
                             operator_ids.into_iter().map(|id| id as u64).collect();
                         let res = do_unmark_invalid_bundle_authors::<Test>(&operators);
                         #[cfg(not(feature = "fuzzing"))]
-                        println!("Unmarking operators {{:?}} as invalid bundle authors\n-->{{:?}}", operators, res); */
+                        println!("Unmarking operators {:?} as invalid bundle authors\n-->{:?}", operators, res); */
                     }
                 }
                 // Check invariants after each action  
