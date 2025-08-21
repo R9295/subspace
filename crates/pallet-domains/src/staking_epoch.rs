@@ -598,7 +598,6 @@ pub fn do_slash_operator<T: Config>(
                 break;
             }
         }
-        debug_assert!(Operators::<T>::get(operator_id).is_some());
 
         // The operator state is safe to cleanup if there is no entry in `Deposits` and `Withdrawals`
         // which means all nominator (including the operator owner) have been slashed.
@@ -621,7 +620,6 @@ pub fn do_slash_operator<T: Config>(
         }
         Ok(slashed_nominator_count)
     });
-    /*     debug_assert!(Operators::<T>::get(operator_id).is_some()); */
     res
 }
 

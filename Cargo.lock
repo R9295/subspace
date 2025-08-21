@@ -8003,6 +8003,7 @@ dependencies = [
  "sp-io",
  "sp-keystore",
  "sp-runtime",
+ "sp-state-machine",
  "sp-std",
  "sp-subspace-mmr",
  "sp-version",
