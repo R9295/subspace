@@ -1,5 +1,8 @@
 #![feature(variant_count)]
 use core::mem;
+use frame_system::Account;
+use pallet_balances::Holds;
+use pallet_balances::TotalIssuance;
 use domain_runtime_primitives::DEFAULT_EVM_CHAIN_ID;
 use domain_runtime_primitives::BlockNumber as DomainBlockNumber;
 use domain_runtime_primitives::opaque::Header as DomainHeader;
@@ -10,9 +13,10 @@ use frame_support::weights::{IdentityFee, Weight};
 use frame_support::{PalletId, assert_ok, derive_impl, parameter_types};
 use frame_system::mocking::MockUncheckedExtrinsic;
 use frame_system::pallet_prelude::*;
+use pallet_domains::{DepositOnHold, HeadDomainNumber};
 use pallet_domains::domain_registry::DomainConfigParams;
-use pallet_domains::staking::invariants::validate_all_invariants;
 use pallet_domains::staking::{
+    OperatorStatus,
     SharePrice, do_deregister_operator, do_mark_invalid_bundle_authors,
     do_mark_operators_as_slashed, do_nominate_operator, do_register_operator, do_reward_operators,
     do_unlock_funds, do_unlock_nominator, do_unmark_invalid_bundle_authors, do_withdraw_stake,
@@ -57,11 +61,13 @@ use subspace_runtime_primitives::{
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FuzzData {
-    pub epochs: Vec<(u8, Epoch)>,
+    /// 5 epochs with N epochs skipped
+    pub epochs: [(u8, Epoch); 5],
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Epoch {
+    /// 5 actions split between 10 users
     actions: [(u8, FuzzAction); 5],
 }
 
@@ -113,9 +119,12 @@ enum FuzzAction {
 }
 
 fn fuzz(data: &FuzzData) {
-    let accounts: Vec<AccountId> = (0..10).map(|i| (i as u128)).collect();
+    let accounts: Vec<AccountId> = (0..5).map(|i| (i as u128)).collect();
+    let mut initial_issuance = 0;
+    let mint =  (u16::MAX as u128) * 2 * AI3;
     for account in &accounts {
-        <Test as Config>::Currency::make_free_balance_be(account, (u16::MAX as u128) * 2 * AI3);
+        <Test as Config>::Currency::make_free_balance_be(account, mint);
+        initial_issuance += mint;
     }
     let domain_id = register_genesis_domain(1, 1);
     let mut operators = HashMap::new();
@@ -313,14 +322,6 @@ fn fuzz(data: &FuzzData) {
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Rewarding operator {operator:?} with {reward_amount:?}\n-->{res:?}");
                 }
-                /* FuzzAction::Finalize => {
-                    validate_all_invariants::<Test>(DOMAIN_ID).unwrap();
-                    let res = do_finalize_domain_current_epoch::<Test>(domain_id);
-                    assert!(res.is_ok());
-                    assert!(validate_all_invariants::<Test>(DOMAIN_ID).is_ok());
-                    #[cfg(not(feature = "fuzzing"))]
-                    println!("Finalizing");
-                } */
                 FuzzAction::MarkInvalidBundleAuthors { operator_id } => {
                     if operators.len() == 0 {
                         continue;
@@ -402,11 +403,114 @@ fn fuzz(data: &FuzzData) {
                     );
                 }
             }
+            let num_ops = validate_before_finalization::<Test>(DOMAIN_ID);
             let res = do_finalize_domain_current_epoch::<Test>(domain_id);
             assert!(res.is_ok());
-            validate_all_invariants::<Test>(DOMAIN_ID).unwrap();
+            validate_after_finalization::<Test>(DOMAIN_ID, num_ops);
+            validate_general_invariants(initial_issuance);
+            let head_domain_number = HeadDomainNumber::<Test>::get(domain_id);
+            HeadDomainNumber::<Test>::set(
+                domain_id,
+                head_domain_number + 1,
+            );
+            for _ in 0..*skip {
+                let res = do_finalize_domain_current_epoch::<Test>(domain_id);
+                assert!(res.is_ok());
+                let head_domain_number = HeadDomainNumber::<Test>::get(domain_id);
+                HeadDomainNumber::<Test>::set(
+                    domain_id,
+                    head_domain_number + 1,
+                );
+            }
         }
     }
+}
+
+pub fn validate_before_finalization<T: Config>(domain_id: DomainId) -> usize {
+    let domain_summary = DomainStakingSummary::<T>::get(domain_id).unwrap();
+    
+    // INVARIANT: all current_operators are registered and not slashed nor have invalid bundles
+    for operator_id in &domain_summary.next_operators {
+        let operator = Operators::<T>::get(*operator_id).unwrap();
+        if !matches!(operator.status::<T>(*operator_id), OperatorStatus::Registered) {
+            panic!("operator set violated");
+        }
+    }
+
+    domain_summary.next_operators.len()
+}
+    
+    
+pub fn validate_after_finalization<T: Config<Balance = u128>>(domain_id: DomainId, num_prev_operators: usize) {
+    let domain_summary = DomainStakingSummary::<T>::get(domain_id).unwrap();
+    for (operator_id, operator_balance) in &domain_summary.current_operators {
+        let operator = Operators::<T>::get(operator_id).unwrap();
+        let mut accumulated_balance = 0;
+        let mut nominator_count = 0;
+        for ((operator, nominator), balance) in DepositOnHold::<T>::iter() {
+            if *operator_id == operator {
+                assert!(balance >= T::MinNominatorStake::get());
+                accumulated_balance += balance;
+                nominator_count += 1;
+            }
+        } 
+        assert!(accumulated_balance >= ((nominator_count - 1) * T::MinNominatorStake::get()) + T::MinOperatorStake::get());
+        // TODO: consider rewards (and in case of withdrawals, set this as substracted) 
+        // INVARIANT: 0 < SharePrice < 1 
+        let share_price = SharePrice::new::<T>(operator.current_total_shares, operator.current_total_stake).unwrap();
+    }
+    
+    // INVARIANT: Total domain stake == accumulated operators' curent_stake.
+    let aggregated_stake: BalanceOf<T> = domain_summary.current_operators
+        .values()
+        .fold(BalanceOf::<T>::zero(), |acc, stake| acc.saturating_add(*stake));
+    assert!(aggregated_stake == domain_summary.current_total_stake);
+    
+    // INVARIANT: all current_operators are registered and not slashed nor have invalid bundles
+    for (operator_id, _) in &domain_summary.current_operators {
+        let operator = Operators::<T>::get(operator_id).unwrap();
+        if !matches!(operator.status::<T>(*operator_id), OperatorStatus::Registered) {
+            panic!("operator set violated");
+        }
+    }
+
+    // INVARIANT: all operators which were part of the next operator set before finalization are present now
+    assert_eq!(num_prev_operators, domain_summary.current_operators.len());
+}
+
+fn validate_general_invariants(initial_total_issuance: Balance) {
+    // After execution of all blocks, we run invariants
+    let mut counted_free: Balance = 0;
+    let mut counted_reserved: Balance = 0;
+    for (account, info) in Account::<Test>::iter() {
+        let consumers = info.consumers;
+        let providers = info.providers;
+        assert!(!(consumers > 0 && providers == 0), "Invalid c/p state");
+        counted_free += info.data.free;
+        counted_reserved += info.data.reserved;
+        let max_lock: Balance = Balances::locks(&account)
+            .iter()
+            .map(|l| l.amount)
+            .max()
+            .unwrap_or_default();
+        assert_eq!(
+            max_lock, info.data.frozen,
+            "Max lock should be equal to frozen balance"
+        );
+        let sum_holds: Balance = Holds::<Test>::get(&account)
+            .iter()
+            .map(|l| l.amount)
+            .sum();
+        assert!(
+            sum_holds <= info.data.reserved,
+            "Sum of all holds ({sum_holds}) should be less than or equal to reserved balance {}",
+            info.data.reserved
+        );
+    }
+    let total_issuance = TotalIssuance::<Test>::get();
+    let counted_issuance = counted_free + counted_reserved;
+    assert_eq!(total_issuance, counted_issuance);
+    assert!(total_issuance >= initial_total_issuance);
 }
 
 fn register_operator(operator: AccountId, amount: Balance) -> Option<OperatorId> {
