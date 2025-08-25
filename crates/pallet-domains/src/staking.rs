@@ -32,9 +32,9 @@ use sp_std::vec::IntoIter;
 
 /// A nominators deposit.
 #[derive(TypeInfo, Debug, Encode, Decode, Clone, PartialEq, Eq, Default)]
-pub(crate) struct Deposit<Share: Copy, Balance: Copy> {
-    pub(crate) known: KnownDeposit<Share, Balance>,
-    pub(crate) pending: Option<PendingDeposit<Balance>>,
+pub struct Deposit<Share: Copy, Balance: Copy> {
+    pub known: KnownDeposit<Share, Balance>,
+    pub pending: Option<PendingDeposit<Balance>>,
 }
 
 /// A share price is parts per billion of shares/ai3.
@@ -45,7 +45,7 @@ pub struct SharePrice(pub Perquintill);
 impl SharePrice {
     /// Creates a new instance of share price from shares and stake.
     /// Returns an error if there are more shares than stake or either value is zero.
-    pub(crate) fn new<T: Config>(
+    pub fn new<T: Config>(
         total_shares: T::Share,
         total_stake: BalanceOf<T>,
     ) -> Result<Self, Error> {
@@ -65,13 +65,13 @@ impl SharePrice {
 
     /// Converts stake to shares based on the share price.
     /// Always rounding down i.e. may return less share due to arithmetic dust.
-    pub(crate) fn stake_to_shares<T: Config>(&self, stake: BalanceOf<T>) -> T::Share {
+    pub fn stake_to_shares<T: Config>(&self, stake: BalanceOf<T>) -> T::Share {
         self.0.mul_floor(stake).into()
     }
 
     /// Converts shares to stake based on the share price.
     /// Always rounding down i.e. may return less stake due to arithmetic dust.
-    pub(crate) fn shares_to_stake<T: Config>(&self, shares: T::Share) -> BalanceOf<T> {
+    pub fn shares_to_stake<T: Config>(&self, shares: T::Share) -> BalanceOf<T> {
         // NOTE: `stakes = shares / share_price = shares / (total_shares / total_stake)`
         // every `div` operation come with an arithmetic dust, to return a rounding down stakes,
         // we want the first `div` rounding down (i.e. `saturating_reciprocal_mul_floor`) and
@@ -84,7 +84,7 @@ impl SharePrice {
     }
 
     /// Return a 1:1 share price
-    pub(crate) fn one() -> Self {
+    pub fn one() -> Self {
         Self(Perquintill::one())
     }
 }
@@ -94,7 +94,7 @@ impl SharePrice {
 pub struct DomainEpoch(DomainId, EpochIndex);
 
 impl DomainEpoch {
-    pub(crate) fn deconstruct(self) -> (DomainId, EpochIndex) {
+    pub fn deconstruct(self) -> (DomainId, EpochIndex) {
         (self.0, self.1)
     }
 }
@@ -106,23 +106,23 @@ impl From<(DomainId, EpochIndex)> for DomainEpoch {
 }
 
 pub struct NewDeposit<Balance> {
-    pub(crate) staking: Balance,
-    pub(crate) storage_fee_deposit: Balance,
+    pub staking: Balance,
+    pub storage_fee_deposit: Balance,
 }
 
 /// A nominator's shares against their deposits to given operator pool.
 #[derive(TypeInfo, Debug, Encode, Decode, Copy, Clone, PartialEq, Eq, Default)]
-pub(crate) struct KnownDeposit<Share: Copy, Balance: Copy> {
-    pub(crate) shares: Share,
-    pub(crate) storage_fee_deposit: Balance,
+pub struct KnownDeposit<Share: Copy, Balance: Copy> {
+    pub shares: Share,
+    pub storage_fee_deposit: Balance,
 }
 
 /// A nominators pending deposit in AI3 that needs to be converted to shares once domain epoch is complete.
 #[derive(TypeInfo, Debug, Encode, Decode, Copy, Clone, PartialEq, Eq)]
-pub(crate) struct PendingDeposit<Balance: Copy> {
-    pub(crate) effective_domain_epoch: DomainEpoch,
-    pub(crate) amount: Balance,
-    pub(crate) storage_fee_deposit: Balance,
+pub struct PendingDeposit<Balance: Copy> {
+    pub effective_domain_epoch: DomainEpoch,
+    pub amount: Balance,
+    pub storage_fee_deposit: Balance,
 }
 
 impl<Balance: Copy + CheckedAdd> PendingDeposit<Balance> {
@@ -135,32 +135,32 @@ impl<Balance: Copy + CheckedAdd> PendingDeposit<Balance> {
 
 /// A nominator's withdrawal from a given operator pool.
 #[derive(TypeInfo, Debug, Encode, Decode, Clone, PartialEq, Eq, Default)]
-pub(crate) struct Withdrawal<Balance, Share, DomainBlockNumber> {
+pub struct Withdrawal<Balance, Share, DomainBlockNumber> {
     /// Total withdrawal amount requested by the nominator that are in unlocking state excluding withdrawal
     /// in shares and the storage fee
-    pub(crate) total_withdrawal_amount: Balance,
+    pub total_withdrawal_amount: Balance,
     /// Total amount of storage fee on withdraw (including withdrawal in shares)
-    pub(crate) total_storage_fee_withdrawal: Balance,
+    pub total_storage_fee_withdrawal: Balance,
     /// Individual withdrawal amounts with their unlocking block for a given domain
-    pub(crate) withdrawals: VecDeque<WithdrawalInBalance<DomainBlockNumber, Balance>>,
+    pub withdrawals: VecDeque<WithdrawalInBalance<DomainBlockNumber, Balance>>,
     /// Withdrawal that was initiated by nominator and not converted to balance due to
     /// unfinished domain epoch.
-    pub(crate) withdrawal_in_shares: Option<WithdrawalInShares<DomainBlockNumber, Share, Balance>>,
+    pub withdrawal_in_shares: Option<WithdrawalInShares<DomainBlockNumber, Share, Balance>>,
 }
 
 #[derive(TypeInfo, Debug, Encode, Decode, Clone, PartialEq, Eq)]
-pub(crate) struct WithdrawalInBalance<DomainBlockNumber, Balance> {
-    pub(crate) unlock_at_confirmed_domain_block_number: DomainBlockNumber,
-    pub(crate) amount_to_unlock: Balance,
-    pub(crate) storage_fee_refund: Balance,
+pub struct WithdrawalInBalance<DomainBlockNumber, Balance> {
+    pub unlock_at_confirmed_domain_block_number: DomainBlockNumber,
+    pub amount_to_unlock: Balance,
+    pub storage_fee_refund: Balance,
 }
 
 #[derive(TypeInfo, Debug, Encode, Decode, Clone, PartialEq, Eq)]
-pub(crate) struct WithdrawalInShares<DomainBlockNumber, Share, Balance> {
-    pub(crate) domain_epoch: DomainEpoch,
-    pub(crate) unlock_at_confirmed_domain_block_number: DomainBlockNumber,
-    pub(crate) shares: Share,
-    pub(crate) storage_fee_refund: Balance,
+pub struct WithdrawalInShares<DomainBlockNumber, Share, Balance> {
+    pub domain_epoch: DomainEpoch,
+    pub unlock_at_confirmed_domain_block_number: DomainBlockNumber,
+    pub shares: Share,
+    pub storage_fee_refund: Balance,
 }
 
 #[derive(TypeInfo, Debug, Encode, Decode, Clone, PartialEq, Eq)]
@@ -422,7 +422,7 @@ pub fn do_register_operator<T: Config>(
 /// then create a new pending deposit in the current epoch.
 /// If there is a pending deposit for the current epoch, then simply increment the amount.
 /// Returns updated deposit info
-pub(crate) fn do_calculate_previous_epoch_deposit_shares_and_add_new_deposit<T: Config>(
+pub fn do_calculate_previous_epoch_deposit_shares_and_add_new_deposit<T: Config>(
     operator_id: OperatorId,
     nominator_id: NominatorId<T>,
     current_domain_epoch: DomainEpoch,
@@ -468,7 +468,7 @@ pub(crate) fn do_calculate_previous_epoch_deposit_shares_and_add_new_deposit<T: 
     })
 }
 
-pub(crate) fn do_convert_previous_epoch_deposits<T: Config>(
+pub fn do_convert_previous_epoch_deposits<T: Config>(
     operator_id: OperatorId,
     deposit: &mut Deposit<T::Share, BalanceOf<T>>,
     current_domain_epoch_index: EpochIndex,
@@ -520,7 +520,7 @@ pub(crate) fn do_convert_previous_epoch_deposits<T: Config>(
 /// If there is withdrawal happened in the current epoch (thus share price is unavailable),
 /// this will be no-op. If there is withdrawal happened in the previous epoch and the share
 /// price is unavailable, `MissingOperatorEpochSharePrice` error will be return.
-pub(crate) fn do_convert_previous_epoch_withdrawal<T: Config>(
+pub fn do_convert_previous_epoch_withdrawal<T: Config>(
     operator_id: OperatorId,
     withdrawal: &mut Withdrawal<BalanceOf<T>, T::Share, DomainBlockNumberFor<T>>,
     current_domain_epoch_index: EpochIndex,
@@ -564,7 +564,7 @@ pub(crate) fn do_convert_previous_epoch_withdrawal<T: Config>(
     Ok(())
 }
 
-pub(crate) fn do_nominate_operator<T: Config>(
+pub fn do_nominate_operator<T: Config>(
     operator_id: OperatorId,
     nominator_id: T::AccountId,
     amount: BalanceOf<T>,
@@ -628,7 +628,7 @@ pub(crate) fn do_nominate_operator<T: Config>(
     })
 }
 
-pub(crate) fn hold_deposit<T: Config>(
+pub fn hold_deposit<T: Config>(
     who: &T::AccountId,
     operator_id: OperatorId,
     amount: BalanceOf<T>,
@@ -652,7 +652,7 @@ pub(crate) fn hold_deposit<T: Config>(
     Ok(())
 }
 
-pub(crate) fn do_deregister_operator<T: Config>(
+pub fn do_deregister_operator<T: Config>(
     operator_owner: T::AccountId,
     operator_id: OperatorId,
 ) -> Result<(), Error> {
@@ -702,7 +702,7 @@ pub(crate) fn do_deregister_operator<T: Config>(
 
 /// A helper function used to calculate the share price at this instant
 /// Returns an error if there are more shares than stake, or if either value is zero.
-pub(crate) fn current_share_price<T: Config>(
+pub fn current_share_price<T: Config>(
     operator_id: OperatorId,
     operator: &Operator<BalanceOf<T>, T::Share, DomainBlockNumberFor<T>, ReceiptHashFor<T>>,
     domain_stake_summary: &StakingSummary<OperatorId, BalanceOf<T>>,
@@ -732,7 +732,7 @@ pub(crate) fn current_share_price<T: Config>(
 /// Absolute stake amount and percentage withdrawals can be handled in the frontend.
 /// Full stake withdrawals are handled by withdrawing everything, if the remaining number of shares
 /// is less than the minimum nominator stake, and the nominator is not the operator.
-pub(crate) fn do_withdraw_stake<T: Config>(
+pub fn do_withdraw_stake<T: Config>(
     operator_id: OperatorId,
     nominator_id: NominatorId<T>,
     to_withdraw: T::Share,
@@ -930,7 +930,7 @@ pub(crate) fn do_withdraw_stake<T: Config>(
 /// Unlocks any withdraws that are ready to be unlocked.
 ///
 /// Return the number of withdrawals being unlocked
-pub(crate) fn do_unlock_funds<T: Config>(
+pub fn do_unlock_funds<T: Config>(
     operator_id: OperatorId,
     nominator_id: NominatorId<T>,
 ) -> Result<u32, Error> {
@@ -1089,7 +1089,7 @@ pub(crate) fn do_unlock_funds<T: Config>(
 }
 
 /// Unlocks an already de-registered operator's nominator given unlock wait period is complete.
-pub(crate) fn do_unlock_nominator<T: Config>(
+pub fn do_unlock_nominator<T: Config>(
     operator_id: OperatorId,
     nominator_id: NominatorId<T>,
 ) -> Result<(), Error> {
@@ -1272,7 +1272,7 @@ pub(crate) fn do_unlock_nominator<T: Config>(
 }
 
 /// Removes all operator storages and mints the total stake back to treasury.
-pub(crate) fn do_cleanup_operator<T: Config>(
+pub fn do_cleanup_operator<T: Config>(
     operator_id: OperatorId,
     total_stake: BalanceOf<T>,
 ) -> Result<(), Error> {
@@ -1296,7 +1296,7 @@ pub(crate) fn do_cleanup_operator<T: Config>(
 }
 
 /// Distribute the reward to the operators equally and drop any dust to treasury.
-pub(crate) fn do_reward_operators<T: Config>(
+pub fn do_reward_operators<T: Config>(
     domain_id: DomainId,
     source: OperatorRewardSource<BlockNumberFor<T>>,
     operators: IntoIter<OperatorId>,
@@ -1357,7 +1357,7 @@ pub(crate) fn do_reward_operators<T: Config>(
 
 /// Freezes the slashed operators and moves the operator to be removed once the domain they are
 /// operating finishes the epoch.
-pub(crate) fn do_mark_operators_as_slashed<T: Config>(
+pub fn do_mark_operators_as_slashed<T: Config>(
     operator_ids: impl AsRef<[OperatorId]>,
     slash_reason: SlashedReason<DomainBlockNumberFor<T>, ReceiptHashFor<T>>,
 ) -> Result<(), Error> {
@@ -1416,7 +1416,7 @@ pub(crate) fn do_mark_operators_as_slashed<T: Config>(
 }
 
 /// Mark all the invalid bundle authors from this ER and remove them from operator set.
-pub(crate) fn do_mark_invalid_bundle_authors<T: Config>(
+pub fn do_mark_invalid_bundle_authors<T: Config>(
     domain_id: DomainId,
     er: &ExecutionReceiptOf<T>,
 ) -> Result<(), Error> {
@@ -1445,7 +1445,7 @@ pub(crate) fn do_mark_invalid_bundle_authors<T: Config>(
     Ok(())
 }
 
-pub(crate) fn mark_invalid_bundle_author<T: Config>(
+pub fn mark_invalid_bundle_author<T: Config>(
     operator_id: OperatorId,
     er_hash: ReceiptHashFor<T>,
     stake_summary: &mut StakingSummary<OperatorId, BalanceOf<T>>,
@@ -1487,7 +1487,7 @@ pub(crate) fn mark_invalid_bundle_author<T: Config>(
 /// Unmark all the invalid bundle authors from this ER that were marked invalid.
 /// Assumed the ER is invalid and add the marked operators as registered and add them
 /// back to next operator set.
-pub(crate) fn do_unmark_invalid_bundle_authors<T: Config>(
+pub fn do_unmark_invalid_bundle_authors<T: Config>(
     domain_id: DomainId,
     er: &ExecutionReceiptOf<T>,
 ) -> Result<(), Error> {
@@ -1547,7 +1547,7 @@ fn unmark_invalid_bundle_author<T: Config>(
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub mod tests {
     use crate::domain_registry::{DomainConfig, DomainObject};
     use crate::pallet::{
         Config, DepositOnHold, Deposits, DomainRegistry, DomainStakingSummary, HeadDomainNumber,
@@ -1589,7 +1589,7 @@ pub(crate) mod tests {
     const STORAGE_FEE_RESERVE: Perquintill = Perquintill::from_percent(20);
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn register_operator(
+    pub fn register_operator(
         domain_id: DomainId,
         operator_account: <Test as frame_system::Config>::AccountId,
         operator_free_balance: BalanceOf<Test>,
@@ -2019,7 +2019,7 @@ pub(crate) mod tests {
     /// The storage fund change in AI3, `true` means increase of the storage fund, `false` means decrease.
     type StorageFundChange = (bool, u32);
 
-    pub(crate) type Share = <Test as Config>::Share;
+    pub type Share = <Test as Config>::Share;
 
     struct WithdrawParams {
         /// The minimum valid nominator stake.
@@ -2311,17 +2311,17 @@ pub(crate) mod tests {
         }
 
     // Export the macro for use in other modules (and earlier in this file).
-    pub(crate) use prop_assert_approx;
+    pub use prop_assert_approx;
 
     /// Rounding down factor for property tests to account for arithmetic precision errors.
     /// This factor is used to allow for small rounding errors in calculations.
     // Perquintill::from_parts(...).left_from_one(), as a constant.
-    pub(crate) const PROP_ROUNDING_DOWN_FACTOR: Perquintill =
+    pub const PROP_ROUNDING_DOWN_FACTOR: Perquintill =
         Perquintill::from_parts(1_000_000_000_000_000_000 - 1_000_000_000);
 
     /// Absolute rounding error tolerance for property tests.
     /// This constant defines the maximum acceptable absolute rounding error in calculations.
-    pub(crate) const PROP_ABSOLUTE_ROUNDING_ERROR: u128 = 1000;
+    pub const PROP_ABSOLUTE_ROUNDING_ERROR: u128 = 1000;
 
     /// The maximum balance we test for in property tests.
     /// This balance should be just below the maximum possible issuance.
@@ -2330,34 +2330,34 @@ pub(crate) mod tests {
     /// RemoveLock (likely converted from BalanceOverflow) in the staking functions.
     //
     // TODO: fix the code so we can get closer to 2^128
-    pub(crate) const MAX_PROP_BALANCE: u128 = 2u128.pow(122);
+    pub const MAX_PROP_BALANCE: u128 = 2u128.pow(122);
 
     /// The minimum operator stake we test for in property tests.
     // TODO: edit the test harness so we can go as low as MinOperatorStake + 1
-    pub(crate) const MIN_PROP_OPERATOR_STAKE: u128 = 3 * <Test as Config>::MinOperatorStake::get();
+    pub const MIN_PROP_OPERATOR_STAKE: u128 = 3 * <Test as Config>::MinOperatorStake::get();
 
     /// The minimum nominator stake we test for in property tests.
-    pub(crate) const MIN_PROP_NOMINATOR_STAKE: u128 =
+    pub const MIN_PROP_NOMINATOR_STAKE: u128 =
         <Test as Config>::MinNominatorStake::get() + 1;
 
     /// The range of operator stakes we test for in property tests.
-    pub(crate) const PROP_OPERATOR_STAKE_RANGE: RangeInclusive<u128> =
+    pub const PROP_OPERATOR_STAKE_RANGE: RangeInclusive<u128> =
         MIN_PROP_OPERATOR_STAKE..=MAX_PROP_BALANCE;
 
     /// The range of nominator stakes we test for in property tests.
-    pub(crate) const PROP_NOMINATOR_STAKE_RANGE: RangeInclusive<u128> =
+    pub const PROP_NOMINATOR_STAKE_RANGE: RangeInclusive<u128> =
         MIN_PROP_NOMINATOR_STAKE..=MAX_PROP_BALANCE;
 
     /// The range of operator or nominator deposits we test for in property tests.
     // TODO: edit the test harness so we can go as low as zero
-    pub(crate) const PROP_DEPOSIT_RANGE: RangeInclusive<u128> =
+    pub const PROP_DEPOSIT_RANGE: RangeInclusive<u128> =
         MIN_PROP_NOMINATOR_STAKE..=MAX_PROP_BALANCE;
 
     /// The range of operator rewards we test for in property tests.
-    pub(crate) const PROP_REWARD_RANGE: RangeInclusive<u128> = 0..=MAX_PROP_BALANCE;
+    pub const PROP_REWARD_RANGE: RangeInclusive<u128> = 0..=MAX_PROP_BALANCE;
 
     /// The range of operator free balances we test for in property tests.
-    pub(crate) const PROP_FREE_BALANCE_RANGE: RangeInclusive<u128> =
+    pub const PROP_FREE_BALANCE_RANGE: RangeInclusive<u128> =
         MIN_PROP_NOMINATOR_STAKE..=MAX_PROP_BALANCE;
 
     // Using too many random parameters and prop_assume()s can reduce test coverage.

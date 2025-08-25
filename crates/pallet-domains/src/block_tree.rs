@@ -66,7 +66,7 @@ pub struct BlockTreeNode<Number, Hash, DomainNumber, DomainHash, Balance> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum AcceptedReceiptType {
+pub enum AcceptedReceiptType {
     // New head receipt that extend the longest branch
     NewHead,
     // Receipt that confirms the head receipt that added in the current block
@@ -74,7 +74,7 @@ pub(crate) enum AcceptedReceiptType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum RejectedReceiptType {
+pub enum RejectedReceiptType {
     // Receipt that is newer than the head receipt but does not extend the head receipt
     InFuture,
     // Receipt that already been pruned
@@ -101,12 +101,12 @@ impl From<RejectedReceiptType> for Error {
 
 /// The type of receipt regarding to its freshness
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ReceiptType {
+pub enum ReceiptType {
     Accepted(AcceptedReceiptType),
     Rejected(RejectedReceiptType),
 }
 
-pub(crate) fn does_receipt_exists<T: Config>(
+pub fn does_receipt_exists<T: Config>(
     domain_id: DomainId,
     domain_number: DomainBlockNumberFor<T>,
     receipt_hash: ReceiptHashFor<T>,
@@ -117,7 +117,7 @@ pub(crate) fn does_receipt_exists<T: Config>(
 }
 
 /// Get the receipt type of the given receipt based on the current block tree state
-pub(crate) fn execution_receipt_type<T: Config>(
+pub fn execution_receipt_type<T: Config>(
     domain_id: DomainId,
     execution_receipt: &ExecutionReceiptRefOf<T>,
 ) -> ReceiptType {
@@ -179,7 +179,7 @@ pub(crate) fn execution_receipt_type<T: Config>(
 }
 
 /// Verify the execution receipt
-pub(crate) fn verify_execution_receipt<T: Config>(
+pub fn verify_execution_receipt<T: Config>(
     domain_id: DomainId,
     execution_receipt: &ExecutionReceiptRefOf<T>,
 ) -> Result<(), Error> {
@@ -322,7 +322,7 @@ pub(crate) fn verify_execution_receipt<T: Config>(
 
 /// Details of the confirmed domain block such as operators, rewards they would receive.
 #[derive(Debug, PartialEq)]
-pub(crate) struct ConfirmedDomainBlockInfo<ConsensusNumber, DomainNumber, Balance> {
+pub struct ConfirmedDomainBlockInfo<ConsensusNumber, DomainNumber, Balance> {
     pub consensus_block_number: ConsensusNumber,
     pub domain_block_number: DomainNumber,
     pub operator_ids: Vec<OperatorId>,
@@ -332,14 +332,14 @@ pub(crate) struct ConfirmedDomainBlockInfo<ConsensusNumber, DomainNumber, Balanc
     pub paid_bundle_storage_fees: BTreeMap<OperatorId, u32>,
 }
 
-pub(crate) type ProcessExecutionReceiptResult<T> = Result<
+pub type ProcessExecutionReceiptResult<T> = Result<
     Option<ConfirmedDomainBlockInfo<BlockNumberFor<T>, DomainBlockNumberFor<T>, BalanceOf<T>>>,
     Error,
 >;
 
 /// Process the execution receipt to add it to the block tree
 /// Returns the domain block number that was pruned, if any
-pub(crate) fn process_execution_receipt<T: Config>(
+pub fn process_execution_receipt<T: Config>(
     domain_id: DomainId,
     submitter: OperatorId,
     execution_receipt: ExecutionReceiptOf<T>,
@@ -563,7 +563,7 @@ fn add_new_receipt_to_block_tree<T: Config>(
 }
 
 /// Import the genesis receipt to the block tree
-pub(crate) fn import_genesis_receipt<T: Config>(
+pub fn import_genesis_receipt<T: Config>(
     domain_id: DomainId,
     genesis_receipt: ExecutionReceiptOf<T>,
 ) {
@@ -582,7 +582,7 @@ pub(crate) fn import_genesis_receipt<T: Config>(
     BlockTreeNodes::<T>::insert(er_hash, block_tree_node);
 }
 
-pub(crate) fn prune_receipt<T: Config>(
+pub fn prune_receipt<T: Config>(
     domain_id: DomainId,
     receipt_number: DomainBlockNumberFor<T>,
 ) -> Result<Option<BlockTreeNodeFor<T>>, Error> {
@@ -613,7 +613,7 @@ pub(crate) fn prune_receipt<T: Config>(
     Ok(Some(block_tree_node))
 }
 
-pub(crate) fn invalid_bundle_authors_for_receipt<T: Config>(
+pub fn invalid_bundle_authors_for_receipt<T: Config>(
     domain_id: DomainId,
     er: &ExecutionReceiptOf<T>,
 ) -> Vec<OperatorId> {

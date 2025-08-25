@@ -17,7 +17,7 @@ pub mod migrations;
 mod nominator_position;
 pub mod runtime_registry;
 pub mod staking;
-mod staking_epoch;
+pub mod staking_epoch;
 pub mod weights;
 
 extern crate alloc;
@@ -85,12 +85,12 @@ use subspace_runtime_primitives::{Balance, CreateUnsigned, Moment, StorageFee};
 /// Maximum number of nominators to slash within a give operator at a time.
 pub const MAX_NOMINATORS_TO_SLASH: u32 = 10;
 
-pub(crate) type BalanceOf<T> = <T as Config>::Balance;
+pub type BalanceOf<T> = <T as Config>::Balance;
 
-pub(crate) type FungibleHoldId<T> =
+pub type FungibleHoldId<T> =
     <<T as Config>::Currency as InspectHold<<T as frame_system::Config>::AccountId>>::Reason;
 
-pub(crate) type NominatorId<T> = <T as frame_system::Config>::AccountId;
+pub type NominatorId<T> = <T as frame_system::Config>::AccountId;
 
 pub trait HoldIdentifier<T: Config> {
     fn staking_staked() -> FungibleHoldId<T>;
@@ -146,7 +146,7 @@ pub type FraudProofFor<T> = FraudProof<
 
 /// Parameters used to verify proof of election.
 #[derive(TypeInfo, Debug, Encode, Decode, Clone, PartialEq, Eq)]
-pub(crate) struct ElectionVerificationParams<Balance> {
+pub struct ElectionVerificationParams<Balance> {
     operators: BTreeMap<OperatorId, Balance>,
     total_domain_stake: Balance,
 }
@@ -195,7 +195,7 @@ const STORAGE_VERSION: StorageVersion = StorageVersion::new(6);
 /// 100 as the maximum number of bundle per block for benchmarking.
 const MAX_BUNDLE_PER_BLOCK: u32 = 100;
 
-pub(crate) type StateRootOf<T> = <<T as frame_system::Config>::Hashing as Hash>::Output;
+pub type StateRootOf<T> = <<T as frame_system::Config>::Hashing as Hash>::Output;
 
 #[expect(clippy::useless_conversion, reason = "Macro-generated")]
 #[frame_support::pallet]
@@ -478,18 +478,19 @@ mod pallet {
 
     /// Stores the next runtime id.
     #[pallet::storage]
-    pub(super) type NextRuntimeId<T> = StorageValue<_, RuntimeId, ValueQuery>;
+    pub type NextRuntimeId<T> = StorageValue<_, RuntimeId, ValueQuery>;
 
     /// Stored the occupied evm chain id against a domain_id.
     #[pallet::storage]
     pub type EvmChainIds<T: Config> = StorageMap<_, Identity, EVMChainId, DomainId, OptionQuery>;
+    pub type NextEVMChainId<T> = StorageValue<_, EVMChainId, ValueQuery, StartingEVMChainId>;
 
     #[pallet::storage]
     pub type RuntimeRegistry<T: Config> =
         StorageMap<_, Identity, RuntimeId, RuntimeObject<BlockNumberFor<T>, T::Hash>, OptionQuery>;
 
     #[pallet::storage]
-    pub(super) type ScheduledRuntimeUpgrades<T: Config> = StorageDoubleMap<
+    pub type ScheduledRuntimeUpgrades<T: Config> = StorageDoubleMap<
         _,
         Identity,
         BlockNumberFor<T>,
@@ -500,20 +501,20 @@ mod pallet {
     >;
 
     #[pallet::storage]
-    pub(super) type NextOperatorId<T> = StorageValue<_, OperatorId, ValueQuery>;
+    pub type NextOperatorId<T> = StorageValue<_, OperatorId, ValueQuery>;
 
     #[pallet::storage]
-    pub(super) type OperatorIdOwner<T: Config> =
+    pub type OperatorIdOwner<T: Config> =
         StorageMap<_, Identity, OperatorId, T::AccountId, OptionQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn domain_staking_summary)]
-    pub(super) type DomainStakingSummary<T: Config> =
+    pub type DomainStakingSummary<T: Config> =
         StorageMap<_, Identity, DomainId, StakingSummary<OperatorId, BalanceOf<T>>, OptionQuery>;
 
     /// List of all registered operators and their configuration.
     #[pallet::storage]
-    pub(super) type Operators<T: Config> = StorageMap<
+    pub type Operators<T: Config> = StorageMap<
         _,
         Identity,
         OperatorId,
@@ -523,13 +524,13 @@ mod pallet {
 
     /// The highest slot of the bundle submitted by an operator
     #[pallet::storage]
-    pub(super) type OperatorHighestSlot<T: Config> =
+    pub type OperatorHighestSlot<T: Config> =
         StorageMap<_, Identity, OperatorId, u64, ValueQuery>;
 
     /// The set of slot of the bundle submitted by an operator in the current block, cleared at the
     /// next block initialization
     #[pallet::storage]
-    pub(super) type OperatorBundleSlot<T: Config> =
+    pub type OperatorBundleSlot<T: Config> =
         StorageMap<_, Identity, OperatorId, BTreeSet<u64>, ValueQuery>;
 
     /// Share price for the operator pool at the end of Domain epoch.
@@ -540,7 +541,7 @@ mod pallet {
 
     /// List of all deposits for given Operator.
     #[pallet::storage]
-    pub(super) type Deposits<T: Config> = StorageDoubleMap<
+    pub type Deposits<T: Config> = StorageDoubleMap<
         _,
         Identity,
         OperatorId,
@@ -552,7 +553,7 @@ mod pallet {
 
     /// List of all withdrawals for a given operator.
     #[pallet::storage]
-    pub(super) type Withdrawals<T: Config> = StorageDoubleMap<
+    pub type Withdrawals<T: Config> = StorageDoubleMap<
         _,
         Identity,
         OperatorId,
@@ -564,30 +565,30 @@ mod pallet {
 
     /// The amount of balance the nominator hold for a given operator
     #[pallet::storage]
-    pub(super) type DepositOnHold<T: Config> =
+    pub type DepositOnHold<T: Config> =
         StorageMap<_, Identity, (OperatorId, NominatorId<T>), BalanceOf<T>, ValueQuery>;
 
     /// A list operators who were slashed during the current epoch associated with the domain.
     /// When the epoch for a given domain is complete, operator total stake is moved to treasury and
     /// then deleted.
     #[pallet::storage]
-    pub(super) type PendingSlashes<T: Config> =
+    pub type PendingSlashes<T: Config> =
         StorageMap<_, Identity, DomainId, BTreeSet<OperatorId>, OptionQuery>;
 
     /// The pending staking operation count of the current epoch, it should not larger than
     /// `MaxPendingStakingOperation` and will be resetted to 0 upon epoch transition.
     #[pallet::storage]
-    pub(super) type PendingStakingOperationCount<T: Config> =
+    pub type PendingStakingOperationCount<T: Config> =
         StorageMap<_, Identity, DomainId, u32, ValueQuery>;
 
     /// Stores the next domain id.
     #[pallet::storage]
     #[pallet::getter(fn next_domain_id)]
-    pub(super) type NextDomainId<T> = StorageValue<_, DomainId, ValueQuery>;
+    pub type NextDomainId<T> = StorageValue<_, DomainId, ValueQuery>;
 
     /// The domain registry
     #[pallet::storage]
-    pub(super) type DomainRegistry<T: Config> = StorageMap<
+    pub type DomainRegistry<T: Config> = StorageMap<
         _,
         Identity,
         DomainId,
@@ -598,7 +599,7 @@ mod pallet {
     /// The domain block tree, map (`domain_id`, `domain_block_number`) to the hash of ER,
     /// which can be used get the block tree node in `BlockTreeNodes`
     #[pallet::storage]
-    pub(super) type BlockTree<T: Config> = StorageDoubleMap<
+    pub type BlockTree<T: Config> = StorageDoubleMap<
         _,
         Identity,
         DomainId,
@@ -610,19 +611,19 @@ mod pallet {
 
     /// Mapping of block tree node hash to the node, each node represent a domain block
     #[pallet::storage]
-    pub(super) type BlockTreeNodes<T: Config> =
+    pub type BlockTreeNodes<T: Config> =
         StorageMap<_, Identity, ReceiptHashFor<T>, BlockTreeNodeFor<T>, OptionQuery>;
 
     /// The head receipt number of each domain
     #[pallet::storage]
-    pub(super) type HeadReceiptNumber<T: Config> =
+    pub type HeadReceiptNumber<T: Config> =
         StorageMap<_, Identity, DomainId, DomainBlockNumberFor<T>, ValueQuery>;
 
     /// The hash of the new head receipt added in the current consensus block
     ///
     /// Temporary storage only exist during block execution
     #[pallet::storage]
-    pub(super) type NewAddedHeadReceipt<T: Config> =
+    pub type NewAddedHeadReceipt<T: Config> =
         StorageMap<_, Identity, DomainId, T::DomainHash, OptionQuery>;
 
     /// Map of consensus block hashes.
@@ -656,7 +657,7 @@ mod pallet {
     /// the last `BlockTreePruningDepth` domain blocks. Used to verify the invalid bundle fraud proof and
     /// slash malicious operator who have submitted invalid bundle.
     #[pallet::storage]
-    pub(super) type InboxedBundleAuthor<T: Config> =
+    pub type InboxedBundleAuthor<T: Config> =
         StorageMap<_, Identity, T::DomainHash, OperatorId, OptionQuery>;
 
     /// The block number of the best domain block, increase by one when the first bundle of the domain is
@@ -668,7 +669,7 @@ mod pallet {
     // the runtime upgrade tx from the consensus chain and no any user submitted tx from the bundle), use
     // `domain_best_number` for the actual best domain block
     #[pallet::storage]
-    pub(super) type HeadDomainNumber<T: Config> =
+    pub type HeadDomainNumber<T: Config> =
         StorageMap<_, Identity, DomainId, DomainBlockNumberFor<T>, ValueQuery>;
 
     /// A temporary storage to hold any previous epoch details for a given domain
@@ -677,7 +678,7 @@ mod pallet {
     /// TODO: The storage is cleared on block finalization that means this storage is already cleared when
     /// verifying the `submit_bundle` extrinsic and not used at all
     #[pallet::storage]
-    pub(super) type LastEpochStakingDistribution<T: Config> =
+    pub type LastEpochStakingDistribution<T: Config> =
         StorageMap<_, Identity, DomainId, ElectionVerificationParams<BalanceOf<T>>, OptionQuery>;
 
     /// Storage to hold all the domain's latest confirmed block.
@@ -700,22 +701,22 @@ mod pallet {
     /// - All the bad ERs submitted by the operator for this domain are pruned and the operator is slashed
     #[pallet::storage]
     #[pallet::getter(fn latest_submitted_er)]
-    pub(super) type LatestSubmittedER<T: Config> =
+    pub type LatestSubmittedER<T: Config> =
         StorageMap<_, Identity, (DomainId, OperatorId), DomainBlockNumberFor<T>, ValueQuery>;
 
     /// Storage for PermissionedActions for domain instantiation and other permissioned calls.
     #[pallet::storage]
-    pub(super) type PermissionedActionAllowedBy<T: Config> =
+    pub type PermissionedActionAllowedBy<T: Config> =
         StorageValue<_, sp_domains::PermissionedActionAllowedBy<T::AccountId>, OptionQuery>;
 
     /// Accumulate treasury funds temporarily until the funds are above Existential deposit.
     /// We do this to ensure minting small amounts into treasury would not fail.
     #[pallet::storage]
-    pub(super) type AccumulatedTreasuryFunds<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
+    pub type AccumulatedTreasuryFunds<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
     /// Storage used to keep track of which consensus block each domain runtime upgrade happens in.
     #[pallet::storage]
-    pub(super) type DomainRuntimeUpgradeRecords<T: Config> = StorageMap<
+    pub type DomainRuntimeUpgradeRecords<T: Config> = StorageMap<
         _,
         Identity,
         RuntimeId,
@@ -1120,7 +1121,7 @@ mod pallet {
     }
 
     #[pallet::storage]
-    pub(super) type DomainTxRangeState<T: Config> =
+    pub type DomainTxRangeState<T: Config> =
         StorageMap<_, Identity, DomainId, TxRangeState, OptionQuery>;
 
     #[pallet::call]
@@ -2917,7 +2918,7 @@ impl<T: Config> Pallet<T> {
 
     /// Returns the correct bundle and er version based on
     /// the consensus block number at which execution receipt was derived.
-    pub(crate) fn bundle_and_execution_receipt_version_for_consensus_number<BEV>(
+    pub fn bundle_and_execution_receipt_version_for_consensus_number<BEV>(
         er_derived_number: BlockNumberFor<T>,
         previous_versions: BTreeMap<BlockNumberFor<T>, BEV>,
         current_version: BEV,
@@ -3236,7 +3237,7 @@ impl<T: Config> Pallet<T> {
     /// Updates `previous_versions` with the latest bundle and execution receipt version, and
     /// returns the updated map.
     #[must_use = "set PreviousBundleAndExecutionReceiptVersions to the value returned by this function"]
-    pub(crate) fn calculate_previous_bundle_and_execution_receipt_versions<BEV>(
+    pub fn calculate_previous_bundle_and_execution_receipt_versions<BEV>(
         block_number: BlockNumberFor<T>,
         mut previous_versions: BTreeMap<BlockNumberFor<T>, BEV>,
         current_version: BEV,

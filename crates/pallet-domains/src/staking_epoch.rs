@@ -33,7 +33,7 @@ pub enum Error {
     OperatorRewardStaking(TransitionError),
 }
 
-pub(crate) struct EpochTransitionResult {
+pub struct EpochTransitionResult {
     pub rewarded_operator_count: u32,
     pub finalized_operator_count: u32,
     pub completed_epoch_index: EpochIndex,
@@ -41,7 +41,7 @@ pub(crate) struct EpochTransitionResult {
 
 /// Finalizes the domain's current epoch and begins the next epoch.
 /// Returns true of the epoch indeed was finished and the number of operator processed.
-pub(crate) fn do_finalize_domain_current_epoch<T: Config>(
+pub fn do_finalize_domain_current_epoch<T: Config>(
     domain_id: DomainId,
 ) -> Result<EpochTransitionResult, Error> {
     // Reset pending staking operation count to 0
@@ -65,13 +65,13 @@ pub(crate) fn do_finalize_domain_current_epoch<T: Config>(
 }
 
 /// Result holding after `operator_take_reward_tax_and_stake`
-pub(crate) struct OperatorTakeRewardTaxResult {
+pub struct OperatorTakeRewardTaxResult {
     rewarded_operator_count: u32,
     operators_with_self_deposits: BTreeSet<OperatorId>,
 }
 
 /// Operator takes `NominationTax` of the current epoch rewards and stake them.
-pub(crate) fn operator_take_reward_tax_and_stake<T: Config>(
+pub fn operator_take_reward_tax_and_stake<T: Config>(
     domain_id: DomainId,
 ) -> Result<OperatorTakeRewardTaxResult, Error> {
     let mut rewarded_operator_count = 0;
@@ -219,7 +219,7 @@ pub(crate) fn operator_take_reward_tax_and_stake<T: Config>(
     })
 }
 
-pub(crate) fn do_finalize_domain_epoch_staking<T: Config>(
+pub fn do_finalize_domain_epoch_staking<T: Config>(
     domain_id: DomainId,
     operators_with_self_deposits: BTreeSet<OperatorId>,
 ) -> Result<(EpochIndex, u32), Error> {
@@ -322,7 +322,7 @@ pub(crate) fn do_finalize_domain_epoch_staking<T: Config>(
 ///
 /// Return the new total stake of the operator and a bool indicate if its total stake
 /// is changed due to deposit/withdraw/reward happened in the previous epoch
-pub(crate) fn do_finalize_operator_epoch_staking<T: Config>(
+pub fn do_finalize_operator_epoch_staking<T: Config>(
     domain_id: DomainId,
     operator_id: OperatorId,
     previous_epoch: EpochIndex,
@@ -391,7 +391,7 @@ pub(crate) fn do_finalize_operator_epoch_staking<T: Config>(
     Ok((total_stake, true))
 }
 
-pub(crate) fn mint_funds<T: Config>(
+pub fn mint_funds<T: Config>(
     account_id: &T::AccountId,
     amount_to_mint: BalanceOf<T>,
 ) -> Result<(), TransitionError> {
@@ -403,7 +403,7 @@ pub(crate) fn mint_funds<T: Config>(
     Ok(())
 }
 
-pub(crate) fn mint_into_treasury<T: Config>(amount: BalanceOf<T>) -> Result<(), TransitionError> {
+pub fn mint_into_treasury<T: Config>(amount: BalanceOf<T>) -> Result<(), TransitionError> {
     if amount.is_zero() {
         return Ok(());
     }
@@ -427,7 +427,7 @@ pub(crate) fn mint_into_treasury<T: Config>(amount: BalanceOf<T>) -> Result<(), 
 
 /// Slashes any pending slashed operators.
 /// At max slashes the `max_nominator_count` under given operator
-pub(crate) fn do_slash_operator<T: Config>(
+pub fn do_slash_operator<T: Config>(
     domain_id: DomainId,
     max_nominator_count: u32,
 ) -> Result<u32, TransitionError> {
