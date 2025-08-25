@@ -11,6 +11,9 @@ description = "Subspace domains pallet"
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
+[profile.release]
+panic = 'abort'
+
 [dependencies]
 domain-pallet-executive.workspace = true
 pallet-timestamp.workspace = true

@@ -3,15 +3,14 @@ use core::mem;
 use domain_runtime_primitives::BlockNumber as DomainBlockNumber;
 use domain_runtime_primitives::opaque::Header as DomainHeader;
 use frame_support::dispatch::{DispatchInfo, RawOrigin};
-use frame_support::traits::fungible::InspectHold;
 use frame_support::traits::{ConstU64, Currency, Hooks, VariantCount};
 use frame_support::weights::constants::ParityDbWeight;
 use frame_support::weights::{IdentityFee, Weight};
 use frame_support::{PalletId, assert_ok, derive_impl, parameter_types};
 use frame_system::mocking::MockUncheckedExtrinsic;
 use frame_system::pallet_prelude::*;
-use pallet_domains::block_tree::BlockTreeNode;
 use pallet_domains::domain_registry::DomainConfigParams;
+use pallet_domains::staking::invariants::validate_all_invariants;
 use pallet_domains::staking::{
     SharePrice, do_deregister_operator, do_mark_invalid_bundle_authors,
     do_mark_operators_as_slashed, do_nominate_operator, do_register_operator, do_reward_operators,
@@ -32,9 +31,7 @@ use sp_core::crypto::Pair;
 use sp_core::{Get, H256};
 use sp_domains::bundle::bundle_v0::{BundleHeaderV0, BundleV0, SealedBundleHeaderV0};
 use sp_domains::bundle::{BundleVersion, InboxedBundle, OpaqueBundle};
-use sp_domains::execution_receipt::execution_receipt_v0::ExecutionReceiptV0;
-use sp_domains::execution_receipt::{ExecutionReceipt, ExecutionReceiptVersion};
-use sp_domains::merkle_tree::MerkleTree;
+use sp_domains::execution_receipt::ExecutionReceiptVersion;
 use sp_domains::storage::RawGenesis;
 use sp_domains::{
     BundleAndExecutionReceiptVersion, ChainId, DomainId, OperatorAllowList, OperatorId,
@@ -104,7 +101,7 @@ enum FuzzAction {
         operator_id: u8,
         er_id: u8,
     },
-    Finalize,
+    /*     Finalize, */
     RewardOperator {
         operator_id: u8,
         amount: u16,
@@ -113,86 +110,6 @@ enum FuzzAction {
         operator_id: u8,
         slash_reason: u8,
     },
-}
-
-fn check_operator_state_consistency_invariant(operators: Vec<&OperatorId>) {
-    for operator_id in operators {
-        if let Some(operator) = Operators::<Test>::get(*operator_id) {
-            // Check that minimum nominator stake is reasonable
-            assert!(
-                operator.current_total_stake > 0u128,
-                "Operator {operator_id} has negative total_stake: {}",
-                operator.current_total_stake
-            );
-
-            assert!(
-                operator.current_total_shares > 0u128,
-                "Operator {operator_id} has negative total_shares: {}",
-                operator.current_total_shares
-            );
-        }
-    }
-}
-
-fn check_share_price_invariant(
-    operators: &[OperatorId],
-    previous_share_prices: &mut HashMap<u64, SharePrice>,
-    slashed_operators: &mut HashMap<u64, bool>,
-) {
-    for operator_id in operators {
-        let operator_id = *operator_id as u64;
-        if let Some(operator) = Operators::<Test>::get(operator_id) {
-            // Calculate current share price
-            let new_share_price = SharePrice::new::<Test>(
-                operator.current_total_shares,
-                operator.current_total_stake,
-            )
-            .unwrap();
-        }
-    }
-}
-
-fn check_slashing_invariant(operators: &[OperatorId], slashed_operators: &mut HashMap<u64, bool>) {
-    for operator_id in operators {
-        if let Some(operator) = Operators::<Test>::get(*operator_id) {
-            let current_status = operator.status::<Test>(*operator_id);
-
-            // Check if operator is currently slashed
-            let is_currently_slashed = matches!(
-                current_status,
-                pallet_domains::staking::OperatorStatus::Slashed
-            );
-
-            // Update slashed operators tracking
-            if is_currently_slashed {
-                slashed_operators.insert(*operator_id, true);
-            }
-
-            // Invariant: Once slashed, an operator should remain slashed until deregistration
-            if let Some(&was_slashed) = slashed_operators.get(&operator_id) {
-                if was_slashed && !is_currently_slashed {
-                    panic!(
-                        "Invariant violation: Operator {} was previously slashed but is no longer slashed without deregistration",
-                        operator_id
-                    );
-                }
-            }
-        }
-    }
-}
-fn create_genesis(accounts: Vec<AccountId>) {
-    RuntimeGenesisConfig {
-        balances: BalancesConfig {
-            balances: accounts
-                .iter()
-                .cloned()
-                .map(|x| (x, 200_000 * AI3))
-                .collect(),
-        },
-        system: SystemConfig::default(),
-        subspace: SubspaceConfig::default(),
-        domains: DomainsConfig::default(),
-    };
 }
 
 fn fuzz(data: &FuzzData) {
@@ -399,12 +316,14 @@ fn fuzz(data: &FuzzData) {
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Rewarding operator {operator:?} with {reward_amount:?}\n-->{res:?}");
                 }
-                FuzzAction::Finalize => {
+                /* FuzzAction::Finalize => {
+                    validate_all_invariants::<Test>(DOMAIN_ID).unwrap();
                     let res = do_finalize_domain_current_epoch::<Test>(domain_id);
                     assert!(res.is_ok());
+                    assert!(validate_all_invariants::<Test>(DOMAIN_ID).is_ok());
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Finalizing");
-                }
+                } */
                 FuzzAction::MarkInvalidBundleAuthors { operator_id } => {
                     if operators.len() == 0 {
                         continue;
@@ -445,7 +364,9 @@ fn fuzz(data: &FuzzData) {
                     if operators.len() == 0 {
                         continue;
                     }
-                    if invalid_er.len() == 0 {return;}
+                    if invalid_er.len() == 0 {
+                        return;
+                    }
                     let operator = operators
                         .iter()
                         .collect::<Vec<_>>()
@@ -453,13 +374,18 @@ fn fuzz(data: &FuzzData) {
                         .unwrap()
                         .1;
                     let er = invalid_er.get(*er_id as usize % invalid_er.len()).unwrap();
-                    let pending_slashes = PendingSlashes::<Test>::get(domain_id).unwrap_or_default();
-                    let mut invalid_bundle_authors_in_epoch = InvalidBundleAuthors::<Test>::get(domain_id);
+                    let pending_slashes =
+                        PendingSlashes::<Test>::get(domain_id).unwrap_or_default();
+                    let mut invalid_bundle_authors_in_epoch =
+                        InvalidBundleAuthors::<Test>::get(domain_id);
                     let mut stake_summary = DomainStakingSummary::<Test>::get(DOMAIN_ID).unwrap();
 
                     for operator_id in vec![*operator] {
                         if pending_slashes.contains(&operator_id)
-                            || pallet_domains::Pallet::<Test>::is_operator_pending_to_slash(DOMAIN_ID, operator_id)
+                            || pallet_domains::Pallet::<Test>::is_operator_pending_to_slash(
+                                DOMAIN_ID,
+                                operator_id,
+                            )
                         {
                             continue;
                         }
@@ -473,27 +399,16 @@ fn fuzz(data: &FuzzData) {
                     }
 
                     DomainStakingSummary::<Test>::insert(domain_id, stake_summary);
-                    InvalidBundleAuthors::<Test>::insert(domain_id, invalid_bundle_authors_in_epoch);
+                    InvalidBundleAuthors::<Test>::insert(
+                        domain_id,
+                        invalid_bundle_authors_in_epoch,
+                    );
                 }
             }
-
-            // Run all invariant checks after each action
-            check_operator_state_consistency_invariant(operators.values().collect::<Vec<_>>());
-
-            // Collect operator accounts for invariant checks
-            let operator_accounts: Vec<OperatorId> =
-                operators.values().cloned().collect::<Vec<_>>();
-
-            // Check share price and slashing invariants
-            check_share_price_invariant(
-                &operator_accounts,
-                &mut previous_share_prices,
-                &mut slashed_operators,
-            );
-            check_slashing_invariant(&operator_accounts, &mut slashed_operators);
+            let res = do_finalize_domain_current_epoch::<Test>(domain_id);
+            assert!(res.is_ok());
+            validate_all_invariants::<Test>(DOMAIN_ID).unwrap();
         }
-        let res = do_finalize_domain_current_epoch::<Test>(domain_id);
-        assert!(res.is_ok());
     }
 }
 
@@ -526,15 +441,11 @@ fn main() {
         });
     });
 }
-type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlockU32<Test>;
 type Balance = u128;
 
 // TODO: Remove when DomainRegistry is usable.
 const DOMAIN_ID: DomainId = DomainId::new(0);
-
-// Operator id used for testing
-const OPERATOR_ID: OperatorId = 0u64;
 
 // Core Api version ID and default APIs
 // RuntimeVersion's Decode is handwritten to accommodate Backward Compatibility for very old
@@ -931,88 +842,6 @@ pub(crate) fn new_test_ext_with_extensions() -> sp_io::TestExternalities {
     ext
 }
 
-pub(crate) fn create_dummy_receipt(
-    block_number: BlockNumber,
-    consensus_block_hash: Hash,
-    parent_domain_block_receipt_hash: H256,
-    block_extrinsics_roots: Vec<H256>,
-) -> ExecutionReceipt<BlockNumber, Hash, DomainBlockNumber, H256, u128> {
-    let (execution_trace, execution_trace_root) = if block_number == 0 {
-        (Vec::new(), Default::default())
-    } else {
-        let execution_trace = vec![H256::random(), H256::random()];
-        let trace: Vec<[u8; 32]> = execution_trace
-            .iter()
-            .map(|r| r.encode().try_into().expect("H256 must fit into [u8; 32]"))
-            .collect();
-        let execution_trace_root = MerkleTree::from_leaves(trace.as_slice())
-            .root()
-            .expect("Compute merkle root of trace should success")
-            .into();
-        (execution_trace, execution_trace_root)
-    };
-    let inboxed_bundles = block_extrinsics_roots
-        .into_iter()
-        .map(InboxedBundle::dummy)
-        .collect();
-    ExecutionReceipt::V0(ExecutionReceiptV0 {
-        domain_block_number: block_number as DomainBlockNumber,
-        domain_block_hash: H256::random(),
-        domain_block_extrinsic_root: Default::default(),
-        parent_domain_block_receipt_hash,
-        consensus_block_number: block_number,
-        consensus_block_hash,
-        inboxed_bundles,
-        final_state_root: *execution_trace.last().unwrap_or(&Default::default()),
-        execution_trace,
-        execution_trace_root,
-        block_fees: Default::default(),
-        transfers: Default::default(),
-    })
-}
-
-fn create_dummy_bundle(
-    domain_id: DomainId,
-    block_number: BlockNumber,
-    consensus_block_hash: Hash,
-) -> OpaqueBundle<BlockNumber, Hash, DomainHeader, u128> {
-    let execution_receipt = create_dummy_receipt(
-        block_number,
-        consensus_block_hash,
-        Default::default(),
-        vec![],
-    );
-    create_dummy_bundle_with_receipts(
-        domain_id,
-        OPERATOR_ID,
-        Default::default(),
-        execution_receipt,
-    )
-}
-
-pub(crate) fn create_dummy_bundle_with_receipts(
-    domain_id: DomainId,
-    operator_id: OperatorId,
-    bundle_extrinsics_root: H256,
-    receipt: ExecutionReceipt<BlockNumber, Hash, DomainBlockNumber, H256, u128>,
-) -> OpaqueBundle<BlockNumber, Hash, DomainHeader, u128> {
-    let pair = OperatorPair::from_seed(&[0; 32]);
-
-    let header = BundleHeaderV0::<_, _, DomainHeader, _> {
-        proof_of_election: ProofOfElection::dummy(domain_id, operator_id),
-        receipt,
-        estimated_bundle_weight: Default::default(),
-        bundle_extrinsics_root,
-    };
-
-    let signature = pair.sign(header.hash().as_ref());
-
-    OpaqueBundle::V0(BundleV0 {
-        sealed_header: SealedBundleHeaderV0::new(header, signature),
-        extrinsics: Vec::new(),
-    })
-}
-
 pub(crate) struct ReadRuntimeVersion(pub Vec<u8>);
 
 impl sp_core::traits::ReadRuntimeVersion for ReadRuntimeVersion {
@@ -1072,73 +901,4 @@ pub(crate) fn register_genesis_domain(creator: u128, operator_number: usize) -> 
     .unwrap();
     do_finalize_domain_current_epoch::<Test>(DOMAIN_ID).unwrap();
     DOMAIN_ID
-}
-
-// Submit new head receipt to extend the block tree from the genesis block
-pub(crate) fn extend_block_tree_from_zero(
-    domain_id: DomainId,
-    operator_id: u64,
-    to: DomainBlockNumberFor<Test>,
-) -> ExecutionReceiptOf<Test> {
-    let genesis_receipt = get_block_tree_node_at::<Test>(domain_id, 0)
-        .unwrap()
-        .execution_receipt;
-    extend_block_tree(domain_id, operator_id, to, genesis_receipt)
-}
-
-// Submit new head receipt to extend the block tree
-pub(crate) fn extend_block_tree(
-    domain_id: DomainId,
-    operator_id: u64,
-    to: DomainBlockNumberFor<Test>,
-    mut latest_receipt: ExecutionReceiptOf<Test>,
-) -> ExecutionReceiptOf<Test> {
-    let current_block_number = frame_system::Pallet::<Test>::current_block_number();
-    assert!(current_block_number < to);
-
-    for block_number in (current_block_number + 1)..to {
-        // Finilize parent block and initialize block at `block_number`
-        run_to_block::<Test>(block_number, *latest_receipt.consensus_block_hash());
-
-        // Submit a bundle with the receipt of the last block
-        let bundle_extrinsics_root = H256::random();
-        let bundle = create_dummy_bundle_with_receipts(
-            domain_id,
-            operator_id,
-            bundle_extrinsics_root,
-            latest_receipt,
-        );
-        assert_ok!(pallet_domains::Pallet::<Test>::submit_bundle(
-            DomainOrigin::ValidatedUnsigned.into(),
-            bundle,
-        ));
-
-        // Construct a `NewHead` receipt of the just submitted bundle, which will be included in the next bundle
-        let head_receipt_number = HeadReceiptNumber::<Test>::get(domain_id);
-        let parent_block_tree_node =
-            get_block_tree_node_at::<Test>(domain_id, head_receipt_number).unwrap();
-        latest_receipt = create_dummy_receipt(
-            block_number,
-            H256::random(),
-            parent_block_tree_node
-                .execution_receipt
-                .hash::<DomainHashingFor<Test>>(),
-            vec![bundle_extrinsics_root],
-        );
-    }
-
-    // Finilize parent block and initialize block at `to`
-    run_to_block::<Test>(to, *latest_receipt.consensus_block_hash());
-
-    latest_receipt
-}
-
-#[allow(clippy::type_complexity)]
-pub(crate) fn get_block_tree_node_at<T: Config>(
-    domain_id: DomainId,
-    block_number: DomainBlockNumberFor<T>,
-) -> Option<
-    BlockTreeNode<BlockNumberFor<T>, T::Hash, DomainBlockNumberFor<T>, T::DomainHash, BalanceOf<T>>,
-> {
-    BlockTree::<T>::get(domain_id, block_number).and_then(BlockTreeNodes::<T>::get)
 }

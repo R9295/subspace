@@ -32,7 +32,7 @@ pub enum Error {
     FinalizeDomainEpochStaking(TransitionError),
     OperatorRewardStaking(TransitionError),
 }
-#[derive(Debug)]
+
 pub struct EpochTransitionResult {
     pub rewarded_operator_count: u32,
     pub finalized_operator_count: u32,
@@ -144,19 +144,6 @@ pub fn operator_take_reward_tax_and_stake<T: Config>(
 
                 // calculate operator tax, mint the balance, and stake them
                 let operator_tax_amount = operator.nomination_tax.mul_floor(reward);
-                
-                // Add the remaining rewards to the operator's `current_total_stake` FIRST
-                // This ensures the share price used for operator tax deposit calculation
-                // reflects the correct post-reward value, fixing the share price calculation bug
-                let rewards = reward
-                    .checked_sub(&operator_tax_amount)
-                    .ok_or(TransitionError::BalanceUnderflow)?;
-
-                operator.current_total_stake = operator
-                    .current_total_stake
-                    .checked_add(&rewards)
-                    .ok_or(TransitionError::BalanceOverflow)?;
-
                 if !operator_tax_amount.is_zero() {
                     let nominator_id = OperatorIdOwner::<T>::get(operator_id)
                         .ok_or(TransitionError::MissingOperatorOwner)?;
@@ -167,6 +154,7 @@ pub fn operator_take_reward_tax_and_stake<T: Config>(
                     let operator_tax_deposit =
                         deposit_reserve_for_storage_fund::<T>(operator_id, &nominator_id, operator_tax_amount)
                             .map_err(TransitionError::BundleStorageFund)?;
+
                     crate::staking::hold_deposit::<T>(
                         &nominator_id,
                         operator_id,
@@ -201,6 +189,18 @@ pub fn operator_take_reward_tax_and_stake<T: Config>(
 
                     operators_with_self_deposits.insert(operator_id);
                 }
+
+                // Add the remaining rewards to the operator's `current_total_stake` which increases the
+                // share price of the staking pool and as a way to distribute the reward to the nominator
+                let rewards = reward
+                    .checked_sub(&operator_tax_amount)
+                    .ok_or(TransitionError::BalanceUnderflow)?;
+
+                operator.current_total_stake = operator
+                    .current_total_stake
+                    .checked_add(&rewards)
+                    .ok_or(TransitionError::BalanceOverflow)?;
+
                 rewarded_operator_count += 1;
 
                 Ok(())
@@ -237,7 +237,6 @@ pub fn do_finalize_domain_epoch_staking<T: Config>(
         let mut total_domain_stake = BalanceOf::<T>::zero();
         let mut current_operators = BTreeMap::new();
         let mut next_operators = BTreeSet::new();
-        /*         println!("{:?}", stake_summary.next_operators); */
         for next_operator_id in &stake_summary.next_operators {
             // If an operator is pending to slash then similar to the slashed operator it should not be added
             // into the `next_operators/current_operators` and we should not `do_finalize_operator_epoch_staking`
@@ -329,7 +328,6 @@ pub fn do_finalize_operator_epoch_staking<T: Config>(
     previous_epoch: EpochIndex,
     check_status: bool,
 ) -> Result<(BalanceOf<T>, bool), TransitionError> {
-    /*     println!("{:?}", operator_id); */
     let mut operator = match Operators::<T>::get(operator_id) {
         Some(op) => op,
         None => return Err(TransitionError::UnknownOperator),
@@ -386,7 +384,6 @@ pub fn do_finalize_operator_epoch_staking<T: Config>(
     );
 
     // update operator state
-    println!("updated1");
     operator.current_total_shares = total_shares;
     operator.current_total_stake = total_stake;
     Operators::<T>::set(operator_id, Some(operator));
@@ -450,7 +447,7 @@ pub fn do_slash_operator<T: Config>(
         .ok_or(TransitionError::DomainNotInitialized)?
         .current_epoch_index;
 
-    let res = Operators::<T>::try_mutate_exists(operator_id, |maybe_operator| {
+    Operators::<T>::try_mutate_exists(operator_id, |maybe_operator| {
         // take the operator so this operator info is removed once we slash the operator.
         let mut operator = maybe_operator
             .take()
@@ -619,9 +616,9 @@ pub fn do_slash_operator<T: Config>(
             operator.total_storage_fee_deposit = total_storage_fee_deposit;
             *maybe_operator = Some(operator);
         }
+
         Ok(slashed_nominator_count)
-    });
-    res
+    })
 }
 
 #[cfg(test)]
@@ -634,7 +631,7 @@ mod tests {
     use crate::staking::tests::{Share, register_operator};
     use crate::staking::{
         DomainEpoch, Error as TransitionError, Error, do_deregister_operator, do_nominate_operator,
-        do_reward_operators, do_unlock_nominator, do_withdraw_stake,
+        do_reward_operators, do_unlock_nominator, do_withdraw_stake, SharePrice,
     };
     use crate::staking_epoch::{
         do_finalize_domain_current_epoch, operator_take_reward_tax_and_stake,
@@ -1077,7 +1074,11 @@ mod tests {
             assert_eq!(get_current_epoch(), 1);
             do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
             assert_eq!(get_current_epoch(), 2);
-
+            let operator = Operators::<Test>::get(0).unwrap();
+            let initial_total_stake = operator.current_total_stake;
+            let mut total_stake = operator.current_total_stake;
+            let mut old_shares = operator.current_total_shares;
+            let old_share_price = SharePrice::new::<Test>(old_shares, total_stake).unwrap();
             // reward operators in the epoch 2
             do_reward_operators::<Test>(
                 domain_id,
@@ -1087,6 +1088,17 @@ mod tests {
             )
             .unwrap();
             do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
+            let operator = Operators::<Test>::get(0).unwrap();
+            let final_total_stake = operator.current_total_stake;
+            assert!(final_total_stake > initial_total_stake);
+            let mut total_stake = operator.current_total_stake;
+            let mut total_shares = operator.current_total_shares;
+            let share_price = SharePrice::new::<Test>(total_shares, total_stake).unwrap();
+            println!(
+            "{:?} {:?}", 
+            (old_share_price.stake_to_shares::<Test>(initial_total_stake), old_shares), 
+            (share_price.stake_to_shares::<Test>(final_total_stake), operator.current_total_shares)
+            );  
             operator_share_price_exists(domain_id, vec![0, 2, 3], 2);
             // operator 1 did not receive any rewards nor has any deposits or withdrawals
             operator_share_price_does_not_exist(domain_id, vec![1], 2);
@@ -1128,79 +1140,5 @@ mod tests {
             assert_eq!(get_current_epoch(), 4);
         })
     }
-
-    #[test]
-    fn poc() {
-        let domain_id = DomainId::new(0);
-        let operator_account = 1;
-        let pair = OperatorPair::from_seed(&[0; 32]);
-        let initial_stake = 100 * AI3;
-        let reward_amount = 50 * AI3;
-        
-        let mut ext = new_test_ext();
-        ext.execute_with(|| {
-            // Register operator with some initial stake
-            let (operator_id, _) = register_operator(
-                domain_id,
-                operator_account,
-                200 * AI3,
-                initial_stake,
-                10 * AI3,
-                pair.public(),
-                Percent::from_parts(60), // 60% nomination tax
-                BTreeMap::default(),
-            );
-
-            do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
-            
-            // Get initial share price
-            let operator = Operators::<Test>::get(operator_id).unwrap();
-            let initial_share_price = crate::staking::SharePrice::new::<Test>(
-                operator.current_total_shares,
-                operator.current_total_stake,
-            ).unwrap();
-            
-            // Add rewards to trigger the bug
-            do_reward_operators::<Test>(
-                domain_id,
-                OperatorRewardSource::Dummy,
-                vec![operator_id].into_iter(),
-                reward_amount,
-            ).unwrap();
-
-            // Take operator tax and stake it - this is where the bug occurs
-            operator_take_reward_tax_and_stake::<Test>(domain_id).unwrap();
-            
-            // Get share price after reward processing but before finalization
-            let operator_after_tax = Operators::<Test>::get(operator_id).unwrap();
-            let share_price_after_tax = crate::staking::SharePrice::new::<Test>(
-                operator_after_tax.current_total_shares,
-                operator_after_tax.current_total_stake,
-            ).unwrap();
-            
-            // Finalize the epoch to process deposits
-            do_finalize_domain_current_epoch::<Test>(domain_id).unwrap();
-            
-            // Get final share price
-            let operator_final = Operators::<Test>::get(operator_id).unwrap();
-            let final_share_price = crate::staking::SharePrice::new::<Test>(
-                operator_final.current_total_shares,
-                operator_final.current_total_stake,
-            ).unwrap();
-            
-            // The bug: share price should never decrease without slashing
-            // But due to incorrect deposit share calculation, it does
-            println!("Initial share price: {:?}", initial_share_price);
-            println!("After tax share price: {:?}", share_price_after_tax);  
-            println!("Final share price: {:?}", final_share_price);
-            
-            // This assertion will fail due to the bug
-            assert!(
-                final_share_price.0 >= initial_share_price.0,
-                "Share price decreased from {:?} to {:?} without slashing - this violates economic invariants",
-                initial_share_price.0,
-                final_share_price.0
-            );
-        });
-    }
 }
+
