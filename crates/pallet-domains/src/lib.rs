@@ -483,11 +483,11 @@ mod pallet {
     /// Stored the occupied evm chain id against a domain_id.
     #[pallet::storage]
     pub type EvmChainIds<T: Config> = StorageMap<_, Identity, EVMChainId, DomainId, OptionQuery>;
-    pub type NextEVMChainId<T> = StorageValue<_, EVMChainId, ValueQuery, StartingEVMChainId>;
 
     #[pallet::storage]
     pub type RuntimeRegistry<T: Config> =
         StorageMap<_, Identity, RuntimeId, RuntimeObject<BlockNumberFor<T>, T::Hash>, OptionQuery>;
+
 
     #[pallet::storage]
     pub type ScheduledRuntimeUpgrades<T: Config> = StorageDoubleMap<

@@ -1,5 +1,6 @@
 #![feature(variant_count)]
 use core::mem;
+use domain_runtime_primitives::DEFAULT_EVM_CHAIN_ID;
 use domain_runtime_primitives::BlockNumber as DomainBlockNumber;
 use domain_runtime_primitives::opaque::Header as DomainHeader;
 use frame_support::dispatch::{DispatchInfo, RawOrigin};
@@ -56,13 +57,12 @@ use subspace_runtime_primitives::{
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FuzzData {
-    pub epochs: [Epoch; 10],
+    pub epochs: Vec<(u8, Epoch)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Epoch {
-    /// 10 users = 10 actions
-    actions: [FuzzAction; 10],
+    actions: [(u8, FuzzAction); 5],
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -125,9 +125,9 @@ fn fuzz(data: &FuzzData) {
     let mut previous_share_prices: HashMap<u64, SharePrice> = HashMap::new();
     let mut slashed_operators: HashMap<u64, bool> = HashMap::new();
     let mut invalid_er = Vec::new();
-    for epoch in &data.epochs {
-        for (index, action) in epoch.actions.iter().enumerate() {
-            let user = accounts.get(index).unwrap();
+    for (skip, epoch) in &data.epochs {
+        for ((user, action)) in epoch.actions.iter() {
+            let user = accounts.get(*user as usize % accounts.len()).unwrap();
             match action {
                 FuzzAction::RegisterOperator { amount } => {
                     let res = register_operator(*user, *amount as u128);
@@ -150,7 +150,6 @@ fn fuzz(data: &FuzzData) {
                     }
                     let amount = *amount as u128 * AI3;
                     let amount = amount.max(21 * AI3);
-                    // TODO:
                     let operator = operators
                         .iter()
                         .collect::<Vec<_>>()
@@ -173,7 +172,6 @@ fn fuzz(data: &FuzzData) {
                     if operators.len() == 0 {
                         continue;
                     }
-                    // TODO:
                     let (owner, operator) = operators
                         .iter()
                         .collect::<Vec<_>>()
@@ -202,7 +200,6 @@ fn fuzz(data: &FuzzData) {
                     let operator = operators
                         .get(*operator_id as usize % operators.len())
                         .unwrap();
-                    // TODO: make sure shares are actually u128
                     let res =
                         do_withdraw_stake::<Test>(*operator, *nominator, *shares as u128 * AI3);
                     #[cfg(not(feature = "fuzzing"))]
@@ -895,7 +892,7 @@ pub(crate) fn register_genesis_domain(creator: u128, operator_number: usize) -> 
             bundle_slot_probability: (1, 1),
             operator_allow_list: OperatorAllowList::Anyone,
             initial_balances: Default::default(),
-            domain_runtime_config: Default::default(),
+            domain_runtime_info: (DEFAULT_EVM_CHAIN_ID, Default::default()).into(),
         },
     )
     .unwrap();
