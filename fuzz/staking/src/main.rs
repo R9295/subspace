@@ -155,7 +155,7 @@ fn fuzz(data: &FuzzData) {
                     operator_id,
                     amount,
                 } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping NominateOperator");
                         continue;
@@ -181,7 +181,7 @@ fn fuzz(data: &FuzzData) {
                     );
                 }
                 FuzzAction::DeregisterOperator { operator_id } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping DeregisterOperator");
                         continue;
@@ -201,7 +201,7 @@ fn fuzz(data: &FuzzData) {
                     operator_id,
                     shares,
                 } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping WithdrawStake");
                         continue;
@@ -227,7 +227,7 @@ fn fuzz(data: &FuzzData) {
                     operator_id,
                     nominator_id,
                 } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping UnlockFunds");
                         continue;
@@ -251,7 +251,7 @@ fn fuzz(data: &FuzzData) {
                     operator_id,
                     nominator_id,
                 } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping UnlockNominator");
                         continue;
@@ -275,7 +275,7 @@ fn fuzz(data: &FuzzData) {
                     operator_id,
                     slash_reason,
                 } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping MarkOperatorsAsSlashed");
                         continue;
@@ -296,7 +296,7 @@ fn fuzz(data: &FuzzData) {
                     do_slash_operator::<Test>(DOMAIN_ID, u32::MAX).unwrap();
                 }
                 FuzzAction::SlashOperator => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping SlashOperator");
                         continue;
@@ -313,7 +313,7 @@ fn fuzz(data: &FuzzData) {
                     operator_id,
                     amount,
                 } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping RewardOperator");
                         continue;
@@ -328,7 +328,7 @@ fn fuzz(data: &FuzzData) {
                     let res = do_reward_operators::<Test>(
                         domain_id,
                         sp_domains::OperatorRewardSource::Dummy,
-                        vec![*operator as u64].into_iter(),
+                        vec![*operator].into_iter(),
                         reward_amount,
                     )
                     .unwrap();
@@ -337,7 +337,7 @@ fn fuzz(data: &FuzzData) {
                     println!("Rewarding operator {operator:?} with {amount:?} AI3 \n-->{res:?}");
                 }
                 FuzzAction::MarkInvalidBundleAuthors { operator_id } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping MarkInvalidBundleAuthors");
                         continue;
@@ -353,12 +353,12 @@ fn fuzz(data: &FuzzData) {
                     ));
                 }
                 FuzzAction::UnmarkInvalidBundleAuthors { operator_id, er_id } => {
-                    if operators.len() == 0 {
+                    if operators.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping UnmarkInvalidBundleAuthors");
                         continue;
                     }
-                    if invalid_ers.len() == 0 {
+                    if invalid_ers.is_empty() {
                         #[cfg(not(feature = "fuzzing"))]
                         println!("skipping UnmarkInvalidBundleAuthors");
                         continue;
@@ -381,7 +381,7 @@ fn fuzz(data: &FuzzData) {
             check_invariants_after_finalization::<Test>(DOMAIN_ID, prev_validator_states);
             check_general_invariants::<Test>(initial_issuance);
             #[cfg(not(feature = "fuzzing"))]
-            println!("skipping {:?} epochs", skip);
+            println!("skipping {skip:?} epochs");
             for _ in 0..*skip {
                 conclude_domain_epoch::<Test>(DOMAIN_ID);
             }

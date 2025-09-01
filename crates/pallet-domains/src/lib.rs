@@ -12,11 +12,12 @@ mod tests;
 #[cfg(feature = "fuzz")]
 pub mod tests;
 
-
 pub mod block_tree;
 pub mod bundle_storage_fund;
 pub mod domain_registry;
 pub mod extensions;
+#[cfg(feature = "fuzz")]
+pub mod fuzz_utils;
 pub mod migrations;
 mod nominator_position;
 pub mod runtime_registry;
@@ -25,8 +26,6 @@ pub mod staking;
 pub mod staking_epoch;
 #[cfg(not(feature = "fuzz"))]
 mod staking_epoch;
-#[cfg(feature = "fuzz")]
-pub mod fuzz_utils;
 pub mod weights;
 
 extern crate alloc;
@@ -678,8 +677,8 @@ mod pallet {
     // `domain_best_number` for the actual best domain block
     #[pallet::storage]
     pub(crate) type HeadDomainNumber<T: Config> =
-            StorageMap<_, Identity, DomainId, DomainBlockNumberFor<T>, ValueQuery>;
-    
+        StorageMap<_, Identity, DomainId, DomainBlockNumberFor<T>, ValueQuery>;
+
     /// A temporary storage to hold any previous epoch details for a given domain
     /// if the epoch transitioned in this block so that all the submitted bundles
     /// within this block are verified.
@@ -3434,17 +3433,17 @@ mod vis_macro {
             #[cfg(feature = "fuzz")]
             $(#[$meta])*
             pub fn $($fun)*
-            
+
             #[cfg(not(feature = "fuzz"))]
             $(#[$meta])*
             pub(crate) fn $($fun)*
         );
-        
+
         ($(#[$meta:meta])* struct $($fun:tt)*) => (
             #[cfg(feature = "fuzz")]
             $(#[$meta])*
             pub struct $($fun)*
-            
+
             #[cfg(not(feature = "fuzz"))]
             $(#[$meta])*
             pub(crate) struct $($fun)*

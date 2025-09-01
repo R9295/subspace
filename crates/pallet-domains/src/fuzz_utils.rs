@@ -30,8 +30,8 @@ use crate::staking::{
 };
 use crate::staking_epoch::do_finalize_domain_current_epoch;
 use crate::{
-    BalanceOf, Config, Deposits, DomainBlockNumberFor, DomainStakingSummary,
-    HeadDomainNumber, InvalidBundleAuthors, Operators, PendingSlashes, ReceiptHashFor, Withdrawals,
+    BalanceOf, Config, Deposits, DomainBlockNumberFor, DomainStakingSummary, HeadDomainNumber,
+    InvalidBundleAuthors, Operators, PendingSlashes, ReceiptHashFor, Withdrawals,
 };
 
 pub fn get_next_operators<T: Config>(
