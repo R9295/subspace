@@ -42,6 +42,16 @@ prop-test = {workspace = true, optional = true}
 sp-externalities = {workspace = true, optional = true}
 sp-keystore = {workspace = true, optional = true}
 
+[dev-dependencies]
+domain-pallet-executive.workspace = true
+hex-literal.workspace = true
+pallet-subspace.workspace = true
+pallet-timestamp.workspace = true
+pallet-block-fees.workspace = true
+prop-test.workspace = true
+sp-externalities.workspace = true
+sp-keystore.workspace = true
+
 [features]
 default = ["std"]
 std = [
@@ -81,13 +91,13 @@ runtime-benchmarks = [
     "sp-runtime/runtime-benchmarks",
     "sp-subspace-mmr/runtime-benchmarks",
 ]
+
 fuzz = [
     "dep:domain-pallet-executive",
     "dep:hex-literal",
     "dep:pallet-subspace",
     "dep:pallet-timestamp",
     "dep:pallet-block-fees",
-    "dep:prop-test",
     "dep:sp-externalities",
     "dep:sp-keystore",
 ]
