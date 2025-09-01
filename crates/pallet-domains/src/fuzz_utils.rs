@@ -34,6 +34,7 @@ use crate::{
     InvalidBundleAuthors, Operators, PendingSlashes, ReceiptHashFor, Withdrawals,
 };
 
+#[allow(clippy::type_complexity)]
 pub fn get_next_operators<T: Config>(
     domain_id: DomainId,
 ) -> Vec<Operator<BalanceOf<T>, T::Share, DomainBlockNumberFor<T>, ReceiptHashFor<T>>> {
@@ -129,6 +130,7 @@ pub fn check_invariants_before_finalization<T: Config>(domain_id: DomainId) {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn check_invariants_after_finalization<T: Config<Balance = u128, Share = u128>>(
     domain_id: DomainId,
     prev_ops: Vec<Operator<BalanceOf<T>, T::Share, DomainBlockNumberFor<T>, ReceiptHashFor<T>>>,

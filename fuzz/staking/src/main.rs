@@ -28,7 +28,7 @@ use pallet_domains::fuzz_utils::{
     fuzz_unmark_invalid_bundle_authors, get_next_operators, get_pending_slashes,
 };
 use pallet_domains::staking::{
-    SharePrice, do_deregister_operator, do_mark_operators_as_slashed, do_nominate_operator,
+    do_deregister_operator, do_mark_operators_as_slashed, do_nominate_operator,
     do_register_operator, do_reward_operators, do_unlock_funds, do_unlock_nominator,
     do_withdraw_stake,
 };
@@ -120,8 +120,6 @@ fn fuzz(data: &FuzzData) {
     let domain_id = register_genesis_domain(1);
     let mut operators = BTreeMap::new();
     let mut nominators = BTreeMap::new();
-    // Initialize invariant tracking state
-    let previous_share_prices: BTreeMap<u64, SharePrice> = BTreeMap::new();
     let mut invalid_ers = Vec::new();
     let mut action_count = 0;
     for (skip, epoch) in &data.epochs {
