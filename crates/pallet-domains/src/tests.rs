@@ -1,14 +1,30 @@
 use crate::block_tree::BlockTreeNode;
+#[cfg(test)]
+use crate::block_tree::verify_execution_receipt;
 use crate::domain_registry::DomainConfigParams;
+#[cfg(test)]
+use crate::domain_registry::{DomainConfig, DomainObject};
 use crate::runtime_registry::ScheduledRuntimeUpgrade;
 use crate::staking_epoch::do_finalize_domain_current_epoch;
+
+#[cfg(test)]
+use crate::tests::pallet_mock_version_store::MockPreviousBundleAndExecutionReceiptVersions;
 use crate::{
-    self as pallet_domains, BalanceOf, BlockSlot, BlockTree, BlockTreeNodes, Config, DomainBlockNumberFor, DomainHashingFor, ExecutionReceiptOf, FungibleHoldId, HeadReceiptNumber, NextDomainId,
-    OperatorConfig, RawOrigin as DomainOrigin, RuntimeRegistry, ScheduledRuntimeUpgrades,
+    self as pallet_domains, BalanceOf, BlockSlot, BlockTree, BlockTreeNodes, Config,
+    DomainBlockNumberFor, DomainHashingFor, ExecutionReceiptOf, FungibleHoldId, HeadReceiptNumber,
+    NextDomainId, OperatorConfig, RawOrigin as DomainOrigin, RuntimeRegistry,
+    ScheduledRuntimeUpgrades,
+};
+#[cfg(test)]
+use crate::{
+    BundleError, ConsensusBlockHash, DomainRegistry, DomainRuntimeUpgradeRecords,
+    DomainRuntimeUpgrades, ExecutionInbox, FraudProofError, HeadDomainNumber,
 };
 use core::mem;
 use domain_runtime_primitives::opaque::Header as DomainHeader;
 use domain_runtime_primitives::{BlockNumber as DomainBlockNumber, DEFAULT_EVM_CHAIN_ID};
+#[cfg(test)]
+use frame_support::assert_err;
 use frame_support::dispatch::{DispatchInfo, RawOrigin};
 use frame_support::traits::{ConstU64, Currency, Hooks, VariantCount};
 use frame_support::weights::constants::ParityDbWeight;
@@ -19,6 +35,8 @@ use frame_system::pallet_prelude::*;
 use pallet_subspace::NormalEraChange;
 use parity_scale_codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
+#[cfg(test)]
+use sp_consensus_slots::Slot;
 use sp_core::crypto::Pair;
 use sp_core::{Get, H256};
 use sp_domains::bundle::bundle_v0::{BundleHeaderV0, BundleV0, SealedBundleHeaderV0};
@@ -28,26 +46,50 @@ use sp_domains::execution_receipt::{ExecutionReceipt, ExecutionReceiptVersion};
 use sp_domains::merkle_tree::MerkleTree;
 use sp_domains::storage::RawGenesis;
 use sp_domains::{
-    BundleAndExecutionReceiptVersion, ChainId, DomainId, OperatorAllowList,
-    OperatorId, OperatorPair, ProofOfElection, RuntimeId, RuntimeType,
+    BundleAndExecutionReceiptVersion, ChainId, DomainId, OperatorAllowList, OperatorId,
+    OperatorPair, ProofOfElection, RuntimeId, RuntimeType,
 };
+#[cfg(test)]
+use sp_domains::{EMPTY_EXTRINSIC_ROOT, OperatorSignature};
+#[cfg(test)]
+use sp_domains::{bundle_producer_election::make_transcript, execution_receipt::SingletonReceipt};
+#[cfg(test)]
+use sp_domains_fraud_proof::fraud_proof::FraudProof;
 use sp_keystore::Keystore;
+#[cfg(test)]
+use sp_keystore::testing::MemoryKeystore;
+use sp_runtime::BuildStorage;
+#[cfg(test)]
+use sp_runtime::OpaqueExtrinsic;
 use sp_runtime::app_crypto::AppCrypto;
+#[cfg(test)]
+use sp_runtime::generic::EXTRINSIC_FORMAT_VERSION;
+#[cfg(test)]
+use sp_runtime::generic::Preamble;
+#[cfg(test)]
+use sp_runtime::traits::BlakeTwo256;
 use sp_runtime::traits::{
-    AccountIdConversion, BlockNumberProvider, Bounded, ConstU16, Hash as HashT,
-    IdentityLookup, One, Zero,
+    AccountIdConversion, BlockNumberProvider, Bounded, ConstU16, Hash as HashT, IdentityLookup,
+    One, Zero,
 };
 use sp_runtime::transaction_validity::TransactionValidityError;
-use sp_runtime::BuildStorage;
+#[cfg(test)]
+use sp_runtime::type_with_default::TypeWithDefault;
 use sp_version::{ApiId, RuntimeVersion, create_apis_vec};
 use std::num::NonZeroU64;
+use subspace_core_primitives::SlotNumber;
+#[cfg(test)]
+use subspace_core_primitives::U256 as P256;
 use subspace_core_primitives::pieces::Piece;
+#[cfg(test)]
+use subspace_core_primitives::pot::PotOutput;
 use subspace_core_primitives::segments::HistorySize;
 use subspace_core_primitives::solutions::SolutionRange;
-use subspace_core_primitives::SlotNumber;
 use subspace_runtime_primitives::{
     AI3, ConsensusEventSegmentSize, HoldIdentifier, Moment, StorageFee,
 };
+#[cfg(test)]
+use subspace_runtime_primitives::{BlockHashFor, Nonce};
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlockU32<Test>;
@@ -1509,7 +1551,8 @@ fn generate_fixtures_for_benchmarking() {
     };
 
     let mock_genesis_er_hash = H256::from_slice(
-        hex!("5207cc85cfd1f53e11f4b9e85bf2d0a4f33e24d0f0f18b818b935a6aa47d3930").as_slice(),
+        hex_literal::hex!("5207cc85cfd1f53e11f4b9e85bf2d0a4f33e24d0f0f18b818b935a6aa47d3930")
+            .as_slice(),
     );
 
     let trace: Vec<<Test as Config>::DomainHash> = vec![
