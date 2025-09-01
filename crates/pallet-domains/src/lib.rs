@@ -9,6 +9,10 @@ mod benchmarking;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "fuzz")]
+pub mod tests;
+
+
 pub mod block_tree;
 pub mod bundle_storage_fund;
 pub mod domain_registry;
@@ -17,7 +21,12 @@ pub mod migrations;
 mod nominator_position;
 pub mod runtime_registry;
 pub mod staking;
+#[cfg(feature = "fuzz")]
+pub mod staking_epoch;
+#[cfg(not(feature = "fuzz"))]
 mod staking_epoch;
+#[cfg(feature = "fuzz")]
+pub mod fuzz_utils;
 pub mod weights;
 
 extern crate alloc;
@@ -508,7 +517,7 @@ mod pallet {
 
     #[pallet::storage]
     #[pallet::getter(fn domain_staking_summary)]
-    pub(super) type DomainStakingSummary<T: Config> =
+    pub(crate) type DomainStakingSummary<T: Config> =
         StorageMap<_, Identity, DomainId, StakingSummary<OperatorId, BalanceOf<T>>, OptionQuery>;
 
     /// List of all registered operators and their configuration.
@@ -540,7 +549,7 @@ mod pallet {
 
     /// List of all deposits for given Operator.
     #[pallet::storage]
-    pub(super) type Deposits<T: Config> = StorageDoubleMap<
+    pub(crate) type Deposits<T: Config> = StorageDoubleMap<
         _,
         Identity,
         OperatorId,
@@ -552,7 +561,7 @@ mod pallet {
 
     /// List of all withdrawals for a given operator.
     #[pallet::storage]
-    pub(super) type Withdrawals<T: Config> = StorageDoubleMap<
+    pub(crate) type Withdrawals<T: Config> = StorageDoubleMap<
         _,
         Identity,
         OperatorId,
@@ -571,7 +580,7 @@ mod pallet {
     /// When the epoch for a given domain is complete, operator total stake is moved to treasury and
     /// then deleted.
     #[pallet::storage]
-    pub(super) type PendingSlashes<T: Config> =
+    pub(crate) type PendingSlashes<T: Config> =
         StorageMap<_, Identity, DomainId, BTreeSet<OperatorId>, OptionQuery>;
 
     /// The pending staking operation count of the current epoch, it should not larger than
@@ -668,9 +677,9 @@ mod pallet {
     // the runtime upgrade tx from the consensus chain and no any user submitted tx from the bundle), use
     // `domain_best_number` for the actual best domain block
     #[pallet::storage]
-    pub(super) type HeadDomainNumber<T: Config> =
-        StorageMap<_, Identity, DomainId, DomainBlockNumberFor<T>, ValueQuery>;
-
+    pub(crate) type HeadDomainNumber<T: Config> =
+            StorageMap<_, Identity, DomainId, DomainBlockNumberFor<T>, ValueQuery>;
+    
     /// A temporary storage to hold any previous epoch details for a given domain
     /// if the epoch transitioned in this block so that all the submitted bundles
     /// within this block are verified.
@@ -3417,4 +3426,29 @@ pub fn calculate_tx_range(
         return cur_tx_range;
     };
     new_tx_range.clamp(lower_bound, upper_bound)
+}
+
+mod vis_macro {
+    macro_rules! make_pub_if_fuzz {
+        ($(#[$meta:meta])* fn $($fun:tt)*) => (
+            #[cfg(feature = "fuzz")]
+            $(#[$meta])*
+            pub fn $($fun)*
+            
+            #[cfg(not(feature = "fuzz"))]
+            $(#[$meta])*
+            pub(crate) fn $($fun)*
+        );
+        
+        ($(#[$meta:meta])* struct $($fun:tt)*) => (
+            #[cfg(feature = "fuzz")]
+            $(#[$meta])*
+            pub struct $($fun)*
+            
+            #[cfg(not(feature = "fuzz"))]
+            $(#[$meta])*
+            pub(crate) struct $($fun)*
+        );
+    }
+    pub(crate) use make_pub_if_fuzz;
 }

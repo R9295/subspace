@@ -63,10 +63,10 @@ use subspace_runtime_primitives::{
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlockU32<Test>;
-type Balance = u128;
+pub type Balance = u128;
 
 // TODO: Remove when DomainRegistry is usable.
-const DOMAIN_ID: DomainId = DomainId::new(0);
+pub const DOMAIN_ID: DomainId = DomainId::new(0);
 
 // Operator id used for testing
 const OPERATOR_ID: OperatorId = 0u64;
@@ -96,7 +96,7 @@ frame_support::construct_runtime!(
 
 type BlockNumber = u32;
 type Hash = H256;
-pub(crate) type AccountId = u128;
+pub type AccountId = u128;
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Test {
@@ -439,7 +439,7 @@ pub(crate) mod pallet_mock_version_store {
 
 impl pallet_mock_version_store::Config for Test {}
 
-pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
+pub fn new_test_ext() -> sp_io::TestExternalities {
     let t = frame_system::GenesisConfig::<Test>::default()
         .build_storage()
         .unwrap();
@@ -447,7 +447,7 @@ pub(crate) fn new_test_ext() -> sp_io::TestExternalities {
     t.into()
 }
 
-pub(crate) fn new_test_ext_with_extensions() -> sp_io::TestExternalities {
+pub fn new_test_ext_with_extensions() -> sp_io::TestExternalities {
     let version = RuntimeVersion {
         spec_name: "test".into(),
         impl_name: Default::default(),
