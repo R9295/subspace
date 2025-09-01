@@ -64,7 +64,7 @@ pub fn fuzz_mark_invalid_bundle_authors<T: Config<DomainHash = H256>>(
     let mut invalid_bundle_authors_in_epoch = InvalidBundleAuthors::<T>::get(domain_id);
     let mut stake_summary = DomainStakingSummary::<T>::get(domain_id).unwrap();
     let mut invalid_ers = vec![];
-    for operator_id in vec![operator] {
+    for operator_id in [operator] {
         if pending_slashes.contains(&operator_id) {
             continue;
         }
@@ -134,7 +134,7 @@ pub fn check_invariants_after_finalization<T: Config<Balance = u128, Share = u12
     prev_ops: Vec<Operator<BalanceOf<T>, T::Share, DomainBlockNumberFor<T>, ReceiptHashFor<T>>>,
 ) {
     let domain_summary = DomainStakingSummary::<T>::get(domain_id).unwrap();
-    for (operator_id, _operator_balance) in &domain_summary.current_operators {
+    for operator_id in domain_summary.current_operators.keys() {
         let operator = Operators::<T>::get(operator_id).unwrap();
         // INVARIANT: 0 < SharePrice < 1
         SharePrice::new::<T>(operator.current_total_shares, operator.current_total_stake)
@@ -149,7 +149,7 @@ pub fn check_invariants_after_finalization<T: Config<Balance = u128, Share = u12
 
     assert!(aggregated_stake == domain_summary.current_total_stake);
     // INVARIANT: all current_operators are registered and not slashed nor have invalid bundles
-    for (operator_id, _) in &domain_summary.current_operators {
+    for operator_id in domain_summary.current_operators.keys() {
         let operator = Operators::<T>::get(operator_id).unwrap();
         if !matches!(
             operator.status::<T>(*operator_id),

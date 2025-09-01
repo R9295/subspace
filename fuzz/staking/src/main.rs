@@ -121,7 +121,7 @@ fn fuzz(data: &FuzzData) {
     let mut operators = BTreeMap::new();
     let mut nominators = BTreeMap::new();
     // Initialize invariant tracking state
-    let mut previous_share_prices: BTreeMap<u64, SharePrice> = BTreeMap::new();
+    let previous_share_prices: BTreeMap<u64, SharePrice> = BTreeMap::new();
     let mut invalid_ers = Vec::new();
     let mut action_count = 0;
     for (skip, epoch) in &data.epochs {
@@ -169,7 +169,7 @@ fn fuzz(data: &FuzzData) {
                         .unwrap()
                         .1;
                     let res = do_nominate_operator::<Test>(*operator, *user, amount);
-                    if let Ok(_) = res {
+                    if res.is_ok() {
                         nominators
                             .entry(*user)
                             .and_modify(|list: &mut Vec<u64>| list.push(*operator))
@@ -186,12 +186,11 @@ fn fuzz(data: &FuzzData) {
                         println!("skipping DeregisterOperator");
                         continue;
                     }
-                    let (owner, operator) = operators
+                    let (owner, operator) = *operators
                         .iter()
                         .collect::<Vec<_>>()
                         .get(*operator_id as usize % operators.len())
-                        .unwrap()
-                        .clone();
+                        .unwrap();
                     let res = do_deregister_operator::<Test>(**owner, *operator);
                     #[cfg(not(feature = "fuzzing"))]
                     println!("de-registering Operator {operator:?} \n-->{res:?}");
@@ -207,12 +206,11 @@ fn fuzz(data: &FuzzData) {
                         continue;
                     }
                     // TODO:
-                    let (nominator, operators) = nominators
+                    let (nominator, operators) = *nominators
                         .iter()
                         .collect::<Vec<_>>()
                         .get(*nominator_id as usize % nominators.len())
-                        .unwrap()
-                        .clone();
+                        .unwrap();
                     let operator = operators
                         .get(*operator_id as usize % operators.len())
                         .unwrap();
@@ -232,12 +230,11 @@ fn fuzz(data: &FuzzData) {
                         println!("skipping UnlockFunds");
                         continue;
                     }
-                    let (nominator, operators) = nominators
+                    let (nominator, operators) = *nominators
                         .iter()
                         .collect::<Vec<_>>()
                         .get(*nominator_id as usize % nominators.len())
-                        .unwrap()
-                        .clone();
+                        .unwrap();
                     let operator = operators
                         .get(*operator_id as usize % operators.len())
                         .unwrap();
@@ -256,12 +253,11 @@ fn fuzz(data: &FuzzData) {
                         println!("skipping UnlockNominator");
                         continue;
                     }
-                    let (nominator, operators) = nominators
+                    let (nominator, operators) = *nominators
                         .iter()
                         .collect::<Vec<_>>()
                         .get(*nominator_id as usize % nominators.len())
-                        .unwrap()
-                        .clone();
+                        .unwrap();
                     let operator = operators
                         .get(*operator_id as usize % operators.len())
                         .unwrap();
@@ -330,8 +326,8 @@ fn fuzz(data: &FuzzData) {
                         sp_domains::OperatorRewardSource::Dummy,
                         vec![*operator].into_iter(),
                         reward_amount,
-                    )
-                    .unwrap();
+                    );
+                    assert!(res.is_ok());
                     rewarded.push(operator);
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Rewarding operator {operator:?} with {amount:?} AI3 \n-->{res:?}");
