@@ -60,29 +60,24 @@ pub fn conclude_domain_epoch<T: Config>(domain_id: DomainId) {
 pub fn fuzz_mark_invalid_bundle_authors<T: Config<DomainHash = H256>>(
     operator: OperatorId,
     domain_id: DomainId,
-) -> Vec<H256> {
+) -> Option<H256> {
     let pending_slashes = PendingSlashes::<T>::get(domain_id).unwrap_or_default();
     let mut invalid_bundle_authors_in_epoch = InvalidBundleAuthors::<T>::get(domain_id);
     let mut stake_summary = DomainStakingSummary::<T>::get(domain_id).unwrap();
-    let mut invalid_ers = vec![];
-    for operator_id in [operator] {
-        if pending_slashes.contains(&operator_id) {
-            continue;
-        }
-        let er = H256::random();
-        invalid_ers.push(er);
-        mark_invalid_bundle_author::<T>(
-            operator,
-            er,
-            &mut stake_summary,
-            &mut invalid_bundle_authors_in_epoch,
-        )
-        .expect("invariant violated: could not mark operator as invalid bundle author");
+    if pending_slashes.contains(&operator) {
+        return None;
     }
-
+    let er = H256::random();
+    mark_invalid_bundle_author::<T>(
+        operator,
+        er,
+        &mut stake_summary,
+        &mut invalid_bundle_authors_in_epoch,
+    )
+    .expect("invariant violated: could not mark operator as invalid bundle author");
     DomainStakingSummary::<T>::insert(domain_id, stake_summary);
     InvalidBundleAuthors::<T>::insert(domain_id, invalid_bundle_authors_in_epoch);
-    invalid_ers
+    Some(er)
 }
 
 pub fn fuzz_unmark_invalid_bundle_authors<T: Config<DomainHash = H256>>(

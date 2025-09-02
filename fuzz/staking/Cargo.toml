@@ -15,6 +15,9 @@ domain-runtime-primitives.workspace = true
 frame-support.workspace = true
 sp-runtime.workspace = true
 sp-core.workspace = true
+pallet-balances.workspace = true
+sp-state-machine.workspace = true
+sp-io.workspace = true
 
 [features]
 fuzzing = []

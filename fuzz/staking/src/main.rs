@@ -19,9 +19,6 @@
 // DEALINGS IN THE SOFTWARE.
 
 use domain_runtime_primitives::DEFAULT_EVM_CHAIN_ID;
-use frame_support::dispatch::RawOrigin;
-use frame_support::traits::Currency;
-use pallet_domains::domain_registry::DomainConfigParams;
 use pallet_domains::fuzz_utils::{
     check_general_invariants, check_invariants_after_finalization,
     check_invariants_before_finalization, conclude_domain_epoch, fuzz_mark_invalid_bundle_authors,
@@ -32,13 +29,19 @@ use pallet_domains::staking::{
     do_register_operator, do_reward_operators, do_unlock_funds, do_unlock_nominator,
     do_withdraw_stake,
 };
-use pallet_domains::staking_epoch::{do_finalize_domain_current_epoch, do_slash_operator};
-use pallet_domains::tests::{AccountId, Balance, DOMAIN_ID, Test, new_test_ext_with_extensions};
+use pallet_domains::staking_epoch::do_slash_operator;
+use pallet_domains::tests::{AccountId, Balance, BalancesConfig, DOMAIN_ID, Test};
 use pallet_domains::{Config, OperatorConfig, SlashedReason};
 use parity_scale_codec::Encode;
+use sp_core::storage::Storage;
 use sp_core::{H256, Pair};
 use sp_domains::storage::RawGenesis;
-use sp_domains::{DomainId, OperatorId, OperatorPair, RuntimeType};
+use sp_domains::{
+    GenesisDomain, OperatorAllowList, OperatorId, OperatorPair, PermissionedActionAllowedBy,
+    RuntimeType,
+};
+use sp_runtime::{BuildStorage, Percent};
+use sp_state_machine::BasicExternalities;
 use std::collections::BTreeMap;
 use subspace_runtime_primitives::AI3;
 
@@ -97,38 +100,69 @@ enum FuzzAction {
     SlashOperator,
 }
 
+fn create_genesis_storage(accounts: &Vec<AccountId>, mint: u128) -> Storage {
+    let raw_genesis_storage = RawGenesis::dummy(vec![1, 2, 3, 4]).encode();
+    let pair = OperatorPair::from_seed(&[*accounts.first().unwrap() as u8; 32]);
+    pallet_domains::tests::RuntimeGenesisConfig {
+        balances: BalancesConfig {
+            balances: accounts.iter().cloned().map(|k| (k, mint)).collect(),
+        },
+        domains: pallet_domains::tests::DomainsConfig {
+            genesis_domains: vec![GenesisDomain {
+                runtime_name: "evm".to_owned(),
+                runtime_type: RuntimeType::Evm,
+                runtime_version: Default::default(),
+                raw_genesis_storage,
+                owner_account_id: *accounts.first().unwrap(),
+                domain_name: "evm-domain".to_owned(),
+                bundle_slot_probability: (1, 1),
+                operator_allow_list: OperatorAllowList::Anyone,
+                signing_key: pair.public(),
+                minimum_nominator_stake: 100 * AI3,
+                nomination_tax: Percent::from_percent(5),
+                initial_balances: vec![],
+                domain_runtime_info: (DEFAULT_EVM_CHAIN_ID, Default::default()).into(),
+            }],
+            permissioned_action_allowed_by: Some(PermissionedActionAllowedBy::Anyone),
+        },
+        subspace: Default::default(),
+        system: Default::default(),
+    }
+    .build_storage()
+    .unwrap()
+}
+
 fn main() {
+    let accounts: Vec<AccountId> = (0..5).map(|i| (i as u128)).collect();
+    let mint = (u16::MAX as u128) * 2 * AI3;
+    let genesis = create_genesis_storage(&accounts, mint);
     ziggy::fuzz!(|data: &[u8]| {
         let Ok(data) = bincode::deserialize::<FuzzData>(data) else {
             return;
         };
-        let mut ext = new_test_ext_with_extensions();
+        // Clone the genesis storage for this fuzz iteration
+        let mut ext = BasicExternalities::new(genesis.clone());
         ext.execute_with(|| {
-            fuzz(&data);
+            fuzz(&data, accounts.clone());
         });
     });
 }
 
-fn fuzz(data: &FuzzData) {
-    let accounts: Vec<AccountId> = (0..5).map(|i| (i as u128)).collect();
-    let mut initial_issuance = 0;
-    let mint = (u16::MAX as u128) * 2 * AI3;
-    for account in &accounts {
-        <Test as Config>::Currency::make_free_balance_be(account, mint);
-        initial_issuance += mint;
-    }
-    let domain_id = register_genesis_domain(1);
+fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
     let mut operators = BTreeMap::new();
     let mut nominators = BTreeMap::new();
     let mut invalid_ers = Vec::new();
-    let mut action_count = 0;
+
+    // Get initial issuance from the pre-setup state
+    let initial_issuance = accounts
+        .iter()
+        .map(|account| <Test as Config>::Currency::free_balance(account))
+        .sum();
+
     for (skip, epoch) in &data.epochs {
         for (user, action) in epoch.actions.iter() {
             let user = accounts.get(*user as usize % accounts.len()).unwrap();
-            let mut rewarded = Vec::new();
-            action_count += 1;
-            #[cfg(not(feature = "fuzzing"))]
-            println!("ACTION {action:?} INDEX {action_count:?}");
+
             match action {
                 FuzzAction::RegisterOperator { amount } => {
                     let res = register_operator(*user, *amount as u128);
@@ -320,13 +354,12 @@ fn fuzz(data: &FuzzData) {
                         .1;
                     let reward_amount = 10u128 * AI3;
                     let res = do_reward_operators::<Test>(
-                        domain_id,
+                        DOMAIN_ID,
                         sp_domains::OperatorRewardSource::Dummy,
                         vec![*operator].into_iter(),
                         reward_amount,
                     );
                     assert!(res.is_ok());
-                    rewarded.push(operator);
                     #[cfg(not(feature = "fuzzing"))]
                     println!("Rewarding operator {operator:?} with {amount:?} AI3 \n-->{res:?}");
                 }
@@ -342,9 +375,11 @@ fn fuzz(data: &FuzzData) {
                         .get(*operator_id as usize % operators.len())
                         .unwrap()
                         .1;
-                    invalid_ers.extend(fuzz_mark_invalid_bundle_authors::<Test>(
-                        *operator, domain_id,
-                    ));
+                    if let Some(invalid_er) = fuzz_mark_invalid_bundle_authors::<Test>(
+                        *operator, DOMAIN_ID,
+                    ) {
+                        invalid_ers.push(invalid_er)
+                    }
                 }
                 FuzzAction::UnmarkInvalidBundleAuthors { operator_id, er_id } => {
                     if operators.is_empty() {
@@ -371,7 +406,7 @@ fn fuzz(data: &FuzzData) {
             }
             check_invariants_before_finalization::<Test>(DOMAIN_ID);
             let prev_validator_states = get_next_operators::<Test>(DOMAIN_ID);
-            conclude_domain_epoch::<Test>(domain_id);
+            conclude_domain_epoch::<Test>(DOMAIN_ID);
             check_invariants_after_finalization::<Test>(DOMAIN_ID, prev_validator_states);
             check_general_invariants::<Test>(initial_issuance);
             #[cfg(not(feature = "fuzzing"))]
@@ -381,38 +416,6 @@ fn fuzz(data: &FuzzData) {
             }
         }
     }
-}
-
-fn register_genesis_domain(creator: u128) -> DomainId {
-    let raw_genesis_storage = RawGenesis::dummy(vec![1, 2, 3, 4]).encode();
-    pallet_domains::Pallet::<Test>::set_permissioned_action_allowed_by(
-        RawOrigin::Root.into(),
-        sp_domains::PermissionedActionAllowedBy::Anyone,
-    )
-    .expect("root can set permissioned action");
-    pallet_domains::Pallet::<Test>::register_domain_runtime(
-        RawOrigin::Root.into(),
-        "evm".to_owned(),
-        RuntimeType::Evm,
-        raw_genesis_storage,
-    )
-    .expect("root can create evm domain runtime");
-
-    pallet_domains::Pallet::<Test>::instantiate_domain(
-        RawOrigin::Signed(creator).into(),
-        DomainConfigParams {
-            domain_name: "evm-domain".to_owned(),
-            runtime_id: 0,
-            maybe_bundle_limit: None,
-            bundle_slot_probability: (1, 1),
-            operator_allow_list: sp_domains::OperatorAllowList::Anyone,
-            initial_balances: Default::default(),
-            domain_runtime_info: (DEFAULT_EVM_CHAIN_ID, Default::default()).into(),
-        },
-    )
-    .unwrap();
-    do_finalize_domain_current_epoch::<Test>(DOMAIN_ID).unwrap();
-    DOMAIN_ID
 }
 
 fn register_operator(operator: AccountId, amount: Balance) -> Option<OperatorId> {
