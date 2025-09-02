@@ -100,7 +100,7 @@ enum FuzzAction {
     SlashOperator,
 }
 
-fn create_genesis_storage(accounts: &Vec<AccountId>, mint: u128) -> Storage {
+fn create_genesis_storage(accounts: &[AccountId], mint: u128) -> Storage {
     let raw_genesis_storage = RawGenesis::dummy(vec![1, 2, 3, 4]).encode();
     let pair = OperatorPair::from_seed(&[*accounts.first().unwrap() as u8; 32]);
     pallet_domains::tests::RuntimeGenesisConfig {
@@ -156,7 +156,7 @@ fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
     // Get initial issuance from the pre-setup state
     let initial_issuance = accounts
         .iter()
-        .map(|account| <Test as Config>::Currency::free_balance(account))
+        .map(<Test as Config>::Currency::free_balance)
         .sum();
 
     for (skip, epoch) in &data.epochs {
@@ -375,9 +375,9 @@ fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
                         .get(*operator_id as usize % operators.len())
                         .unwrap()
                         .1;
-                    if let Some(invalid_er) = fuzz_mark_invalid_bundle_authors::<Test>(
-                        *operator, DOMAIN_ID,
-                    ) {
+                    if let Some(invalid_er) =
+                        fuzz_mark_invalid_bundle_authors::<Test>(*operator, DOMAIN_ID)
+                    {
                         invalid_ers.push(invalid_er)
                     }
                 }

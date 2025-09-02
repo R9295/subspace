@@ -9,7 +9,7 @@ mod benchmarking;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(not(test), feature="std", feature = "fuzz"))]
+#[cfg(all(not(test), feature = "std", feature = "fuzz"))]
 pub mod tests;
 
 pub mod block_tree;
