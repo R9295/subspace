@@ -78,13 +78,13 @@ std = [
     "subspace-runtime-primitives/std",
 ]
 runtime-benchmarks = [
-    "dep:hex-literal",
     "frame-support/runtime-benchmarks",
     "frame-system/runtime-benchmarks",
     "frame-benchmarking",
     "frame-benchmarking/runtime-benchmarks",
     "pallet-subspace/runtime-benchmarks",
     "schnorrkel",
+    "hex-literal",
     "sp-consensus-subspace/runtime-benchmarks",
     "sp-domains/runtime-benchmarks",
     "sp-domains-fraud-proof/runtime-benchmarks",
@@ -94,8 +94,6 @@ runtime-benchmarks = [
 
 fuzz = [
     "dep:domain-pallet-executive",
-    "dep:hex-literal",
-    "dep:pallet-subspace",
     "dep:pallet-timestamp",
     "dep:pallet-block-fees",
     "dep:sp-externalities",
