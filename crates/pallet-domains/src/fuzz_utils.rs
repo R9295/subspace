@@ -188,7 +188,7 @@ pub fn check_general_invariants<
     for (account, info) in Account::<T>::iter() {
         let consumers = info.consumers;
         let providers = info.providers;
-        assert!(!(consumers > 0 && providers == 0), "Invalid c/p state");
+        assert!(!(consumers > 0 && providers == 0), "Invalid account consumers or providers state");
         counted_free += info.data.free;
         counted_reserved += info.data.reserved;
         let max_lock: <T as pallet_balances::Config>::Balance =
