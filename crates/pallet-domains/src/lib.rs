@@ -3426,28 +3426,3 @@ pub fn calculate_tx_range(
     };
     new_tx_range.clamp(lower_bound, upper_bound)
 }
-
-mod vis_macro {
-    macro_rules! make_pub_if_fuzz {
-        ($(#[$meta:meta])* fn $($fun:tt)*) => (
-            #[cfg(feature = "fuzz")]
-            $(#[$meta])*
-            pub fn $($fun)*
-
-            #[cfg(not(feature = "fuzz"))]
-            $(#[$meta])*
-            pub(crate) fn $($fun)*
-        );
-
-        ($(#[$meta:meta])* struct $($fun:tt)*) => (
-            #[cfg(feature = "fuzz")]
-            $(#[$meta])*
-            pub struct $($fun)*
-
-            #[cfg(not(feature = "fuzz"))]
-            $(#[$meta])*
-            pub(crate) struct $($fun)*
-        );
-    }
-    pub(crate) use make_pub_if_fuzz;
-}

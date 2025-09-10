@@ -1,22 +1,14 @@
 // Copyright 2025 Security Research Labs GmbH
-//
-// Permission is hereby granted, free of charge, to any person obtaining a
-// copy of this software and associated documentation files (the "Software"),
-// to deal in the Software without restriction, including without limitation
-// the rights to use, copy, modify, merge, publish, distribute, sublicense,
-// and/or sell copies of the Software, and to permit persons to whom the
-// Software is furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS IN THE SOFTWARE.
+// Permission to use, copy, modify, and/or distribute this software for
+// any purpose with or without fee is hereby granted.
+// 
+// THE SOFTWARE IS PROVIDED “AS IS” AND THE AUTHOR DISCLAIMS ALL
+// WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
+// OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE
+// FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY
+// DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+// AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+// OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 use alloc::collections::BTreeSet;
 use frame_system::Account;
@@ -34,6 +26,7 @@ use crate::{
     InvalidBundleAuthors, Operators, PendingSlashes, ReceiptHashFor, Withdrawals,
 };
 
+/// Fetch the next epoch's operators from the DomainStakingSummary
 #[allow(clippy::type_complexity)]
 pub fn get_next_operators<T: Config>(
     domain_id: DomainId,
@@ -50,6 +43,7 @@ pub fn get_next_operators<T: Config>(
     prev_ops
 }
 
+/// Finalize the epoch and transition to the next one
 pub fn conclude_domain_epoch<T: Config>(domain_id: DomainId) {
     let head_domain_number = HeadDomainNumber::<T>::get(domain_id);
     HeadDomainNumber::<T>::set(domain_id, head_domain_number + One::one());
@@ -57,6 +51,7 @@ pub fn conclude_domain_epoch<T: Config>(domain_id: DomainId) {
         .expect("invariant violated: we must be able to finalize domain epoch");
 }
 
+/// Mark an operator as having produced an invalid bundle
 pub fn fuzz_mark_invalid_bundle_authors<T: Config<DomainHash = H256>>(
     operator: OperatorId,
     domain_id: DomainId,
@@ -80,6 +75,8 @@ pub fn fuzz_mark_invalid_bundle_authors<T: Config<DomainHash = H256>>(
     Some(er)
 }
 
+
+/// Unmark an operator as having produced an invalid bundle
 pub fn fuzz_unmark_invalid_bundle_authors<T: Config<DomainHash = H256>>(
     domain_id: DomainId,
     operator: OperatorId,
@@ -107,10 +104,12 @@ pub fn fuzz_unmark_invalid_bundle_authors<T: Config<DomainHash = H256>>(
     InvalidBundleAuthors::<T>::insert(domain_id, invalid_bundle_authors_in_epoch);
 }
 
+/// Fetch operators who are pending slashing
 pub fn get_pending_slashes<T: Config>(domain_id: DomainId) -> BTreeSet<OperatorId> {
     PendingSlashes::<T>::get(domain_id).unwrap_or_default()
 }
 
+/// Check staking invariants before epoch finalization
 pub fn check_invariants_before_finalization<T: Config>(domain_id: DomainId) {
     let domain_summary = DomainStakingSummary::<T>::get(domain_id).unwrap();
     // INVARIANT: all current_operators are registered and not slashed nor have invalid bundles
@@ -125,6 +124,8 @@ pub fn check_invariants_before_finalization<T: Config>(domain_id: DomainId) {
     }
 }
 
+
+/// Check staking invariants after epoch finalization
 #[allow(clippy::type_complexity)]
 pub fn check_invariants_after_finalization<T: Config<Balance = u128, Share = u128>>(
     domain_id: DomainId,
@@ -162,19 +163,13 @@ pub fn check_invariants_after_finalization<T: Config<Balance = u128, Share = u12
             }
         }
         assert!(shares <= operator.current_total_shares);
-        for (operator, _nominator, withdrawal) in Withdrawals::<T>::iter() {
-            if *operator_id == operator {
-                for _withdrawal in withdrawal.withdrawals {
-                    // TODO
-                }
-            }
-        }
     }
 
     // INVARIANT: all operators which were part of the next operator set before finalization are present now
     assert_eq!(prev_ops.len(), domain_summary.current_operators.len());
 }
 
+/// Check general Substrate invariants that must always hold
 pub fn check_general_invariants<
     T: Config<Balance = u128>
         + pallet_balances::Config<Balance = u128>

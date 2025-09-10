@@ -1,22 +1,14 @@
 // Copyright 2025 Security Research Labs GmbH
+// Permission to use, copy, modify, and/or distribute this software for
+// any purpose with or without fee is hereby granted.
 //
-// Permission is hereby granted, free of charge, to any person obtaining a
-// copy of this software and associated documentation files (the "Software"),
-// to deal in the Software without restriction, including without limitation
-// the rights to use, copy, modify, merge, publish, distribute, sublicense,
-// and/or sell copies of the Software, and to permit persons to whom the
-// Software is furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS IN THE SOFTWARE.
+// THE SOFTWARE IS PROVIDED “AS IS” AND THE AUTHOR DISCLAIMS ALL
+// WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
+// OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE
+// FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY
+// DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+// AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+// OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 use domain_runtime_primitives::DEFAULT_EVM_CHAIN_ID;
 use pallet_domains::fuzz_utils::{
@@ -45,22 +37,27 @@ use sp_state_machine::BasicExternalities;
 use std::collections::BTreeMap;
 use subspace_runtime_primitives::AI3;
 
+const ACTIONS_PER_EPOCH: usize = 5;
+const NUM_EPOCHS: usize = 5;
+const MIN_NOMINATOR_STAKE: Balance = 20;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FuzzData {
-    /// 5 epochs with N epochs skipped
-    pub epochs: [(u8, Epoch); 5],
+    /// NUM_EPOCHS epochs with N epochs skipped
+    pub epochs: [(u8, Epoch); NUM_EPOCHS],
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Epoch {
-    /// 5 actions split between 5 users
-    actions: [(u8, FuzzAction); 5],
+    /// ACTIONS_PER_EPOCH actions split between N users
+    actions: [(u8, FuzzAction); ACTIONS_PER_EPOCH],
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum FuzzAction {
     RegisterOperator {
         amount: u16,
+        tax: u8,
     },
     NominateOperator {
         operator_id: u8,
@@ -118,7 +115,7 @@ fn create_genesis_storage(accounts: &[AccountId], mint: u128) -> Storage {
                 bundle_slot_probability: (1, 1),
                 operator_allow_list: OperatorAllowList::Anyone,
                 signing_key: pair.public(),
-                minimum_nominator_stake: 100 * AI3,
+                minimum_nominator_stake: MIN_NOMINATOR_STAKE * AI3,
                 nomination_tax: Percent::from_percent(5),
                 initial_balances: vec![],
                 domain_runtime_info: (DEFAULT_EVM_CHAIN_ID, Default::default()).into(),
@@ -164,8 +161,8 @@ fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
             let user = accounts.get(*user as usize % accounts.len()).unwrap();
 
             match action {
-                FuzzAction::RegisterOperator { amount } => {
-                    let res = register_operator(*user, *amount as u128);
+                FuzzAction::RegisterOperator { amount, tax } => {
+                    let res = register_operator(*user, *amount as u128, *tax);
                     if let Some(operator) = res {
                         operators.insert(user, operator);
                         nominators
@@ -192,8 +189,7 @@ fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
                         println!("skipping NominateOperator");
                         continue;
                     }
-                    let old_amount = amount.min(&21);
-                    let amount = *old_amount as u128 * AI3;
+                    let amount = (*amount as u128).max(MIN_NOMINATOR_STAKE) * AI3;
                     let operator = operators
                         .iter()
                         .collect::<Vec<_>>()
@@ -209,7 +205,7 @@ fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
                     }
                     #[cfg(not(feature = "fuzzing"))]
                     println!(
-                        "Nominating as Nominator {user:?} for Operator {operator:?} with amount {old_amount:?}\n-->{res:?}"
+                        "Nominating as Nominator {user:?} for Operator {operator:?} with amount {amount:?}\n-->{res:?}"
                     );
                 }
                 FuzzAction::DeregisterOperator { operator_id } => {
@@ -237,7 +233,6 @@ fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
                         println!("skipping WithdrawStake");
                         continue;
                     }
-                    // TODO:
                     let (nominator, operators) = *nominators
                         .iter()
                         .collect::<Vec<_>>()
@@ -418,13 +413,12 @@ fn fuzz(data: &FuzzData, accounts: Vec<AccountId>) {
     }
 }
 
-fn register_operator(operator: AccountId, amount: Balance) -> Option<OperatorId> {
-    let minimum_nominator_stake = 20 * AI3;
+fn register_operator(operator: AccountId, amount: Balance, tax: u8) -> Option<OperatorId> {
     let pair = OperatorPair::from_seed(&[operator as u8; 32]);
     let config = OperatorConfig {
         signing_key: pair.public(),
-        minimum_nominator_stake,
-        nomination_tax: sp_runtime::Percent::from_percent(60),
+        minimum_nominator_stake: MIN_NOMINATOR_STAKE,
+        nomination_tax: sp_runtime::Percent::from_percent(tax.max(100)),
     };
     let res = do_register_operator::<Test>(operator, DOMAIN_ID, amount * AI3, config);
     if let Ok((id, _)) = res {
