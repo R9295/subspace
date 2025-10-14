@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["auto_id_domain_runtime",[["impl <a class=\"trait\" href=\"pallet_block_fees/pallet/trait.Config.html\" title=\"trait pallet_block_fees::pallet::Config\">Config</a> for <a class=\"struct\" href=\"auto_id_domain_runtime/struct.Runtime.html\" title=\"struct auto_id_domain_runtime::Runtime\">Runtime</a>"]]],["auto_id_domain_test_runtime",[["impl <a class=\"trait\" href=\"pallet_block_fees/pallet/trait.Config.html\" title=\"trait pallet_block_fees::pallet::Config\">Config</a> for <a class=\"struct\" href=\"auto_id_domain_test_runtime/struct.Runtime.html\" title=\"struct auto_id_domain_test_runtime::Runtime\">Runtime</a>"]]],["evm_domain_runtime",[["impl <a class=\"trait\" href=\"pallet_block_fees/pallet/trait.Config.html\" title=\"trait pallet_block_fees::pallet::Config\">Config</a> for <a class=\"struct\" href=\"evm_domain_runtime/struct.Runtime.html\" title=\"struct evm_domain_runtime::Runtime\">Runtime</a>"]]],["evm_domain_test_runtime",[["impl <a class=\"trait\" href=\"pallet_block_fees/pallet/trait.Config.html\" title=\"trait pallet_block_fees::pallet::Config\">Config</a> for <a class=\"struct\" href=\"evm_domain_test_runtime/struct.Runtime.html\" title=\"struct evm_domain_test_runtime::Runtime\">Runtime</a>"]]],["pallet_domains",[["impl Config for <a class=\"struct\" href=\"pallet_domains/tests/struct.Test.html\" title=\"struct pallet_domains::tests::Test\">Test</a>"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[306,322,295,310,162]}

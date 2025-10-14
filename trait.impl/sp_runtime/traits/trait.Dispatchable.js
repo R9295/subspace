@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["auto_id_domain_runtime",[["impl Dispatchable for <a class=\"enum\" href=\"auto_id_domain_runtime/enum.RuntimeCall.html\" title=\"enum auto_id_domain_runtime::RuntimeCall\">RuntimeCall</a>"]]],["auto_id_domain_test_runtime",[["impl Dispatchable for <a class=\"enum\" href=\"auto_id_domain_test_runtime/enum.RuntimeCall.html\" title=\"enum auto_id_domain_test_runtime::RuntimeCall\">RuntimeCall</a>"]]],["evm_domain_runtime",[["impl Dispatchable for <a class=\"enum\" href=\"evm_domain_runtime/enum.RuntimeCall.html\" title=\"enum evm_domain_runtime::RuntimeCall\">RuntimeCall</a>"]]],["evm_domain_test_runtime",[["impl Dispatchable for <a class=\"enum\" href=\"evm_domain_test_runtime/enum.RuntimeCall.html\" title=\"enum evm_domain_test_runtime::RuntimeCall\">RuntimeCall</a>"]]],["pallet_domains",[["impl Dispatchable for <a class=\"enum\" href=\"pallet_domains/tests/enum.RuntimeCall.html\" title=\"enum pallet_domains::tests::RuntimeCall\">RuntimeCall</a>"]]],["subspace_runtime",[["impl Dispatchable for <a class=\"enum\" href=\"subspace_runtime/enum.RuntimeCall.html\" title=\"enum subspace_runtime::RuntimeCall\">RuntimeCall</a>"]]],["subspace_test_runtime",[["impl Dispatchable for <a class=\"enum\" href=\"subspace_test_runtime/enum.RuntimeCall.html\" title=\"enum subspace_test_runtime::RuntimeCall\">RuntimeCall</a>"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[193,209,182,197,183,176,191]}
